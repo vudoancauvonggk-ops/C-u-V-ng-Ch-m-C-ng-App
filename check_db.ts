@@ -1,22 +1,31 @@
-import { drizzle } from 'drizzle-orm/node-postgres';
+import * as dotenv from 'dotenv';
+dotenv.config();
+
 import pkg from 'pg';
 const { Pool } = pkg;
-import * as schema from './src/db/schema.ts';
 
-const pool = new Pool({
-  host: process.env.SQL_HOST,
-  user: process.env.SQL_USER,
-  password: process.env.SQL_PASSWORD,
-  database: process.env.SQL_DB_NAME,
-  port: 5432,
-  ssl: true
-});
-
-const db = drizzle(pool, { schema });
-
-async function check() {
-  const skdList = await db.select().from(schema.schedules);
-  console.log("Schedules Count:", skdList.length);
-  process.exit(0);
+const config: any = {};
+if (process.env.DATABASE_URL) {
+  config.connectionString = process.env.DATABASE_URL;
+} else {
+  config.host = process.env.SQL_HOST;
+  config.user = process.env.SQL_USER;
+  config.password = process.env.SQL_PASSWORD;
+  config.database = process.env.SQL_DB_NAME;
 }
-check();
+
+const pool = new Pool(config);
+
+async function checkConnection() {
+  try {
+    const client = await pool.connect();
+    console.log("Database connection successful!");
+    client.release();
+  } catch (err) {
+    console.error("Database connection failed:", err);
+  } finally {
+    await pool.end();
+  }
+}
+
+checkConnection();
