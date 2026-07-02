@@ -1,0 +1,11 @@
+{
+  "name": "Remix: CẦU VỒNG CHẤM CÔNG APP",
+  "description": "Hệ thống quản lý giáo viên, lịch dạy, chấm công định vị GPS, quét QR, selfie, tự động tính lương và báo cáo doanh thu chi phí nhân sự.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

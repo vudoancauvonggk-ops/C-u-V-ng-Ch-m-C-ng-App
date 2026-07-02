@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>Quản Lý Giáo Viên</title>
+    <meta name="description" content="Ứng dụng quản lý lịch dạy giáo viên, điểm danh." />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      // Automatically unregister old service workers to force update
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function(registrations) {
+          let shouldReload = false;
+          for(let registration of registrations) {
+            registration.unregister();
+            shouldReload = true;
+          }
+          if (shouldReload && !sessionStorage.getItem('pwa_reloaded')) {
+            sessionStorage.setItem('pwa_reloaded', 'true');
+            const url = new URL(window.location.href);
+            url.searchParams.set('v', new Date().getTime().toString());
+            window.location.href = url.toString();
+          }
+        });
+      }
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
