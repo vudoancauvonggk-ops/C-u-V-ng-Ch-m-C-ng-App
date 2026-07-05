@@ -16,7 +16,7 @@ import {
   appSettings,
   meetingAttendance
 } from './src/db/schema.ts';
-import { eq } from 'drizzle-orm';
+import { eq, not, ne, isNotNull } from 'drizzle-orm';
 import { 
   INITIAL_TEACHERS, 
   INITIAL_SCHOOLS, 
@@ -395,7 +395,7 @@ async function startServer() {
       }
       res.json({ msg: 'Recovered ' + skdList.length + ' schedules.' });
     } catch(err: any) {
-      res.status(500).json({ error: err.message });
+      console.error('DB ERROR', err); res.status(500).json({ error: err.message, stack: err.stack, full: Object.getOwnPropertyNames(err).reduce((acc, key) => { acc[key] = err[key]; return acc; }, {}) });
     }
   });
 
@@ -411,7 +411,7 @@ async function startServer() {
       }
       res.json({ success: true, settings: data });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      console.error('API ERR:', err); res.status(500).json({ error: err.message, stack: err.stack, details: err.detail || err.code || err.routine });
     }
   });
 
@@ -983,6 +983,19 @@ async function startServer() {
       res.json({ id, ...data });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  
+  app.delete('/api/attendance/images/clear', async (req, res) => {
+    try {
+      // Set photoUrl to empty string for all attendance records
+      // In a real app, you might want to delete only old ones, but here we clear all to free space
+      await db.update(attendance).set({ selfieImage: '' }).where(isNotNull(attendance.id));
+      res.json({ success: true, message: 'All attendance images cleared' });
+    } catch (err: any) {
+      console.log('PG ERROR:', err);
+      res.status(500).json({ error: err.message, stack: err.stack, code: err.code, detail: err.detail });
     }
   });
 
