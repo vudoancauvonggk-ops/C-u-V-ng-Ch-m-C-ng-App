@@ -113,6 +113,7 @@ export const appSettings = pgTable('app_settings', {
   id: text('id').primaryKey(), // We'll just use one row with id = 'global'
   allowTeacherScheduleEdit: boolean('allow_teacher_schedule_edit').default(false).notNull(),
   allowTeacherUpdateSchoolLocation: boolean('allow_teacher_update_school_location').default(false).notNull(),
+  requireSelfieCheckIn: boolean('require_selfie_check_in').default(true).notNull(),
 });
 
 export const meetingAttendance = pgTable('meeting_attendance', {

@@ -133,4 +133,5 @@ export interface AppSettings {
   id: string;
   allowTeacherScheduleEdit: boolean;
   allowTeacherUpdateSchoolLocation?: boolean;
+  requireSelfieCheckIn?: boolean;
 }

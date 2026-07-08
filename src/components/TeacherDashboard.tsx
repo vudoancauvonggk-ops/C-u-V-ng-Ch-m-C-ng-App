@@ -71,6 +71,7 @@ export default function TeacherDashboard({
 
   // Mobile navigation tabs inside smartphone framework
   const [mobileTab, setMobileTab] = useState<'home' | 'schedule' | 'checkin' | 'salary' | 'swap' | 'substitute_tab' | 'school' | 'account'>('home');
+  const [adminOverrideDate, setAdminOverrideDate] = useState<string>('');
 
   // Reset mobile tab if viewing restricted tabs
   useEffect(() => {
@@ -219,31 +220,6 @@ export default function TeacherDashboard({
   const [editingScheduleItem, setEditingScheduleItem] = useState<Schedule | null>(null);
 
   // Custom Background Image
-  const [bgImage, setBgImage] = useState<string>('');
-
-  useEffect(() => {
-    if (currentTeacher) {
-      const savedBg = localStorage.getItem(`teacher_bg_${currentTeacher.id}`);
-      if (savedBg) setBgImage(savedBg);
-      else setBgImage('');
-    }
-  }, [currentTeacher]);
-
-  const handleBgChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const result = event.target?.result as string;
-        setBgImage(result);
-        if (currentTeacher) {
-          localStorage.setItem(`teacher_bg_${currentTeacher.id}`, result);
-        }
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
   // Morning Greeting Notification
   useEffect(() => {
     if (!currentTeacher) return;
@@ -287,8 +263,9 @@ export default function TeacherDashboard({
   // Dynamic calculations based on selected simulation coordinates
   const activeSchedules = schedules.filter(s => !s.isDeleted && s.teacherId === currentTeacher?.id);
   
-  const dToday = new Date(); const todayStr = `${dToday.getFullYear()}-${String(dToday.getMonth() + 1).padStart(2, '0')}-${String(dToday.getDate()).padStart(2, '0')}`;
-  const todayJS = new Date().getDay();
+  const dToday = adminOverrideDate ? new Date(adminOverrideDate) : new Date(); 
+  const todayStr = adminOverrideDate || `${dToday.getFullYear()}-${String(dToday.getMonth() + 1).padStart(2, '0')}-${String(dToday.getDate()).padStart(2, '0')}`;
+  const todayJS = dToday.getDay();
   // Map JavaScript getDay (0=Sunday, 1=Monday...) to app format (2=Monday, 3=Tuesday... 8=Sunday)
   const currentDayOfWeek = todayJS === 0 ? 8 : todayJS + 1;
   const todaySchedules = activeSchedules
@@ -476,7 +453,7 @@ export default function TeacherDashboard({
     //   return;
     // }
 
-    if (!capturedImage) {
+    if (settings?.requireSelfieCheckIn !== false && !capturedImage) {
       customAlert('Thông báo', "❌ YÊU CẦU BẮT BUỘC: Bạn buộc phải chụp một tấm ảnh Selfie thực tế tại cơ quan trước khi hệ thống ghi nhận thời lượng dạy do tính năng định vị vị trí tạm thời bị ADMIN khoá!");
       return;
     }
@@ -505,11 +482,11 @@ export default function TeacherDashboard({
     */
 
     // Real-time dynamic dates
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+    const now = adminOverrideDate ? new Date(adminOverrideDate) : new Date();
+    const timeStr = (adminOverrideDate ? new Date() : now).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
     
     // Create actual ISO date string for today using local time
-    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const todayStr = adminOverrideDate || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     
     const isMorning = typeof selectedSchedule.session === 'string' && (selectedSchedule.session.toLowerCase() === 'morning' || selectedSchedule.session.toLowerCase().includes('sáng') || selectedSchedule.session.startsWith('0') || selectedSchedule.session.startsWith('10') || selectedSchedule.session.startsWith('11') || selectedSchedule.session.startsWith('7') || selectedSchedule.session.startsWith('8') || selectedSchedule.session.startsWith('9'));
     
@@ -523,12 +500,13 @@ export default function TeacherDashboard({
       limitMinute = parseInt(timeMatch[2], 10);
     }
     
-    const isLateFlagged = now.getHours() > limitHour || (now.getHours() === limitHour && now.getMinutes() > limitMinute);
+    const realNow = new Date();
+    const isLateFlagged = realNow.getHours() > limitHour || (realNow.getHours() === limitHour && realNow.getMinutes() > limitMinute);
     let lateReason = '';
     if (isLateFlagged) lateReason = `Chấm công TRỄ. Giờ vào lớp quy định là ${limitHour.toString().padStart(2, '0')}:${limitMinute.toString().padStart(2, '0')} nhưng chấm lúc ${timeStr}. Tiết học này bị đánh dấu cần duyệt.`;
 
     const sessionSchedules = todaySchedules
-      .filter(s => getSessionShort(s.session) === getSessionShort(selectedSchedule.session))
+      .filter(s => getSessionShort(s.session) === getSessionShort(selectedSchedule.session) && s.schoolId === selectedSchedule.schoolId)
       .filter(s => {
         const cName = getClassName(s.classId).toLowerCase();
         const sName = getSchoolName(s.schoolId, s).toLowerCase();
@@ -825,18 +803,22 @@ export default function TeacherDashboard({
               <span>Giáo viên: {currentTeacher?.name || '---'}</span>
             )}
             <div className="flex items-center gap-2">
-              <label className="cursor-pointer bg-slate-100 hover:bg-slate-200 p-1.5 rounded-full transition flex items-center justify-center text-slate-500 hover:text-blue-600" title="Đổi ảnh nền">
-                <ImageIcon className="h-4 w-4" />
-                <input type="file" accept="image/*" onChange={handleBgChange} className="hidden" />
-              </label>
-              {bgImage && (
-                <button 
-                  onClick={() => { setBgImage(''); if (currentTeacher) localStorage.removeItem(`teacher_bg_${currentTeacher.id}`); }}
-                  className="cursor-pointer bg-rose-50 text-rose-500 hover:bg-rose-100 p-1.5 rounded-full transition"
-                  title="Xoá ảnh nền"
-                >
-                  <X className="h-4 w-4" />
-                </button>
+              {currentUser?.role === 'admin' && (
+                <div className="flex items-center gap-1.5 mr-2">
+                  <Calendar className="w-4 h-4 text-neutral-400" />
+                  <input
+                    type="date"
+                    value={adminOverrideDate}
+                    onChange={(e) => setAdminOverrideDate(e.target.value)}
+                    className="p-1 border border-neutral-200 rounded text-[10px] font-medium outline-none bg-slate-100 text-slate-600 focus:bg-white focus:border-blue-300"
+                    title="Đổi ngày giả lập (Admin)"
+                  />
+                  {adminOverrideDate && (
+                    <button onClick={() => setAdminOverrideDate('')} className="text-red-500 hover:text-red-700 p-1 rounded-full bg-red-50" title="Xoá ngày giả lập">
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
               )}
               <span className="text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">Trực tuyến</span>
             </div>
@@ -847,14 +829,11 @@ export default function TeacherDashboard({
             className="flex-1 overflow-y-auto px-5 py-4 space-y-4 font-sans relative" 
             id="iphone_screen_body"
             style={{ 
-              backgroundColor: bgImage ? 'transparent' : '#f8fafc',
-              backgroundImage: bgImage ? `url(${bgImage})` : 'none',
-              backgroundSize: 'cover',
-              backgroundPosition: 'center',
-              backgroundAttachment: 'local'
+              backgroundColor: '#f8fafc',
+                backgroundAttachment: 'local'
             }}
           >
-            {bgImage && <div className="absolute inset-0 bg-white/70 pointer-events-none z-0" />}
+            
             <div className="relative z-10 space-y-4">
             {!currentTeacher ? (
               <div className="flex flex-col items-center justify-center h-full text-center p-6 space-y-4 my-auto animate-fadeIn">
@@ -1260,9 +1239,9 @@ export default function TeacherDashboard({
                     
                     {/* Select Schedule subform */}
                     <div className="space-y-1.5">
-                      <label className="font-bold text-neutral-500 block">Lớp mở màn ca dạy hôm nay:</label>
+                      <label className="font-bold text-neutral-500 block">Chọn lớp muốn điểm danh:</label>
                       <div className="text-[10px] text-emerald-600 font-semibold mb-1 italic">
-                        * Mẹo: Chấm công lớp này sẽ tự động ghi nhận cho toàn bộ các lớp khác trong cùng ca. Bỏ qua nếu đã chấm!
+                        * Mẹo: Chấm công lớp này sẽ tự động ghi nhận cho các lớp khác CÙNG TRƯỜNG trong cùng ca. Nếu bạn dạy trường khác trong cùng ca, vui lòng điểm danh lại cho trường đó!
                       </div>
                       <select
                         value={selectedScheduleId}
@@ -1336,51 +1315,53 @@ export default function TeacherDashboard({
                         </div>
 
                       {/* WEBCAM SELFIE CAPTURING */}
-                      <div className="space-y-2">
-                        <label className="font-bold text-neutral-500 block">Xác thực ảnh khuôn mặt (Xác nhận an toàn):</label>
-                        
-                        <div className="relative aspect-video w-full rounded-2xl overflow-hidden border border-neutral-200 bg-neutral-100 flex flex-col items-center justify-center">
-                          {isCameraActive ? (
-                            <video 
-                              ref={videoRef} 
-                              autoPlay 
-                              playsInline 
-                              className="w-full h-full object-cover scale-x-[-1]"
-                            />
-                          ) : capturedImage ? (
-                            <img src={capturedImage} alt="captured thumbnail" className="w-full h-full object-cover" />
-                          ) : (
-                            <div className="text-center space-y-1.5 text-neutral-400 p-4">
-                              <Camera className="h-8 w-8 mx-auto opacity-40 text-blue-600" />
-                              <p className="text-[10px] leading-normal">Bắt buộc tự chụp chân dung tại bục giảng để kiểm tra gian lận</p>
-                            </div>
-                          )}
+                      {settings?.requireSelfieCheckIn !== false && (
+                        <div className="space-y-2">
+                          <label className="font-bold text-neutral-500 block">Xác thực ảnh khuôn mặt (Xác nhận an toàn):</label>
+                          
+                          <div className="relative aspect-video w-full rounded-2xl overflow-hidden border border-neutral-200 bg-neutral-100 flex flex-col items-center justify-center">
+                            {isCameraActive ? (
+                              <video 
+                                ref={videoRef} 
+                                autoPlay 
+                                playsInline 
+                                className="w-full h-full object-cover scale-x-[-1]"
+                              />
+                            ) : capturedImage ? (
+                              <img src={capturedImage} alt="captured thumbnail" className="w-full h-full object-cover" />
+                            ) : (
+                              <div className="text-center space-y-1.5 text-neutral-400 p-4">
+                                <Camera className="h-8 w-8 mx-auto opacity-40 text-blue-600" />
+                                <p className="text-[10px] leading-normal">Bắt buộc tự chụp chân dung tại bục giảng để kiểm tra gian lận</p>
+                              </div>
+                            )}
 
-                          {/* Hidden canvas for static draw capture */}
-                          <canvas ref={canvasRef} className="hidden" />
-                        </div>
+                            {/* Hidden canvas for static draw capture */}
+                            <canvas ref={canvasRef} className="hidden" />
+                          </div>
 
-                        {/* Webcam buttons togglers */}
-                        <div className="flex gap-2">
-                          {isCameraActive ? (
-                            <button 
-                              type="button" 
-                              onClick={captureSelfiePhoto}
-                              className="w-full py-2 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 transition flex items-center justify-center gap-1"
-                            >
-                              <Check className="h-4.5 w-4.5" /> Bấm Chụp Ảnh
-                            </button>
-                          ) : (
-                            <button 
-                              type="button" 
-                              onClick={startCamera}
-                              className="w-full py-2 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition flex items-center justify-center gap-1"
-                            >
-                              <Camera className="h-4.5 w-4.5" /> Kích Hoạt Camera
-                            </button>
-                          )}
+                          {/* Webcam buttons togglers */}
+                          <div className="flex gap-2">
+                            {isCameraActive ? (
+                              <button 
+                                type="button" 
+                                onClick={captureSelfiePhoto}
+                                className="w-full py-2 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 transition flex items-center justify-center gap-1"
+                              >
+                                <Check className="h-4.5 w-4.5" /> Bấm Chụp Ảnh
+                              </button>
+                            ) : (
+                              <button 
+                                type="button" 
+                                onClick={startCamera}
+                                className="w-full py-2 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition flex items-center justify-center gap-1"
+                              >
+                                <Camera className="h-4.5 w-4.5" /> Kích Hoạt Camera
+                              </button>
+                            )}
+                          </div>
                         </div>
-                      </div>
+                      )}
 
                       {/* OPTIONAL SCAN SECURE QR CODE TO DOUBLE VALIDATE */}
                       <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-150 space-y-2">

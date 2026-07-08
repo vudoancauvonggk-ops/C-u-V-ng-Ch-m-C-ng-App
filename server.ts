@@ -1,7 +1,10 @@
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
+import * as XLSX from 'xlsx';
+import { parseSheetToTeachers, parseSpecialScheduleSheet } from './src/utils/googleSheets.ts';
 import { db } from './src/db/index.ts';
 import { 
   teachers, 
@@ -16,7 +19,7 @@ import {
   appSettings,
   meetingAttendance
 } from './src/db/schema.ts';
-import { eq, not, ne, isNotNull } from 'drizzle-orm';
+import { eq, not, ne, isNotNull, sql } from 'drizzle-orm';
 import { 
   INITIAL_TEACHERS, 
   INITIAL_SCHOOLS, 
@@ -32,7 +35,40 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json({ limit: '50mb' }));
+  app.use(express.json({ limit: '200mb' }));
+
+  let requestsToday = 0;
+  let errorsToday = 0;
+
+  app.use((req, res, next) => {
+    requestsToday++;
+    res.on('finish', () => {
+      if (res.statusCode >= 400) {
+        errorsToday++;
+      }
+    });
+    next();
+  });
+
+  let lastStateUpdate = Date.now();
+  
+  app.use((req, res, next) => {
+    if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method) && req.path.startsWith('/api/')) {
+      res.on('finish', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          lastStateUpdate = Date.now();
+        }
+      });
+    }
+    next();
+  });
+
+  app.get('/api/state/timestamp', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.json({ timestamp: lastStateUpdate, version: SERVER_VERSION });
+  });
 
   // Seed database initially
   try {
@@ -100,8 +136,50 @@ async function startServer() {
   // --- API ROUTES ---
 
   // Health check
-  app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', database: 'PostgreSQL Cloud SQL' });
+  app.get('/api/health', async (req, res) => {
+    let dbType = 'Local PostgreSQL';
+    const dbUrl = process.env.DATABASE_URL || '';
+    if (dbUrl.includes('supabase')) {
+      dbType = 'Supabase (PostgreSQL)';
+    } else if (dbUrl.includes('neon')) {
+      dbType = 'Neon (PostgreSQL)';
+    } else if (dbUrl && !dbUrl.includes('localhost') && !dbUrl.includes('127.0.0.1')) {
+      dbType = 'PostgreSQL (Cloud SQL)';
+    }
+
+    let dbSizeMb = 27; // default fallback if query fails
+    try {
+      const sizeResult = await db.execute(sql`SELECT pg_database_size(current_database()) as size_bytes`);
+      if (sizeResult.rows && sizeResult.rows[0]) {
+        const bytes = Number(sizeResult.rows[0].size_bytes || sizeResult.rows[0][0]);
+        if (!isNaN(bytes)) {
+          dbSizeMb = bytes / (1024 * 1024);
+        }
+      }
+    } catch (err) {
+      console.warn('Could not query pg_database_size:', err);
+    }
+
+    const uptimeSeconds = process.uptime();
+    const days = Math.floor(uptimeSeconds / (3600 * 24));
+    const hours = Math.floor((uptimeSeconds % (3600 * 24)) / 3600);
+    const minutes = Math.floor((uptimeSeconds % 3600) / 60);
+    const uptimeStr = `${days}d ${hours}h ${minutes}m`;
+
+    const isLocal = req.hostname === 'localhost' || req.hostname === '127.0.0.1';
+    const cloudPlatform = isLocal ? 'Local Host (Node.js)' : 'Render (Web Service)';
+    const environment = isLocal ? 'DEVELOPMENT' : 'PRODUCTION';
+
+    res.json({
+      status: 'ok',
+      database: dbType,
+      cloudPlatform,
+      environment,
+      uptime: uptimeStr,
+      dbSizeMb,
+      requestsToday,
+      errorsToday
+    });
   });
 
   // DB Reset and Re-seed
@@ -177,6 +255,270 @@ async function startServer() {
       res.json({ status: 'success', message: 'Database wiped successfully!' });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to wipe database', details: err.message });
+    }
+  });
+
+  app.post('/api/db-restore', async (req, res) => {
+    try {
+      console.log('Restoring database from uploaded backup...');
+      const { 
+        teachers: teachList, 
+        schools: schList, 
+        classes: clsList, 
+        schedules: skdList, 
+        attendance: attList,
+        changes: changeList,
+        notifications: notList,
+        auditLogs: logList,
+        users: userList,
+        settings: settingsData
+      } = req.body;
+
+      // Wipe everything
+      await db.delete(attendance);
+      await db.delete(changeRequests);
+      await db.delete(schedules);
+      await db.delete(classes);
+      await db.delete(schools);
+      await db.delete(teachers);
+      await db.delete(systemNotifications);
+      await db.delete(auditLogs);
+      await db.delete(meetingAttendance);
+      await db.delete(users);
+
+      // Insert teachers
+      if (teachList && Array.isArray(teachList)) {
+        for (const item of teachList) {
+          try {
+            await db.insert(teachers).values(item).onConflictDoUpdate({
+              target: teachers.id,
+              set: item
+            });
+            // Auto-create user for teacher
+            if (item.id) {
+              const uId = 'u_' + item.id;
+              await db.insert(users).values({
+                id: uId,
+                username: item.id,
+                password: '123456789',
+                role: 'member',
+                teacherId: item.id,
+                permissions: '[]',
+                isDeleted: item.isDeleted || false
+              }).onConflictDoUpdate({
+                target: users.username,
+                set: {
+                  isDeleted: item.isDeleted || false
+                }
+              });
+            }
+          } catch (e: any) {
+            console.error('Restore: Failed to insert teacher', item.id, e.message);
+          }
+        }
+      }
+
+      // Insert schools
+      if (schList && Array.isArray(schList)) {
+        for (const item of schList) {
+          try {
+            await db.insert(schools).values(item).onConflictDoUpdate({
+              target: schools.id,
+              set: item
+            });
+          } catch (e: any) {
+            console.error('Restore: Failed to insert school', item.id, e.message);
+          }
+        }
+      }
+
+      // Insert classes
+      if (clsList && Array.isArray(clsList)) {
+        for (const item of clsList) {
+          try {
+            await db.insert(classes).values(item).onConflictDoUpdate({
+              target: classes.id,
+              set: item
+            });
+          } catch (e: any) {
+            console.error('Restore: Failed to insert class', item.id, e.message);
+          }
+        }
+      }
+
+      // Insert schedules
+      if (skdList && Array.isArray(skdList)) {
+        for (const item of skdList) {
+          try {
+            await db.insert(schedules).values(item).onConflictDoUpdate({
+              target: schedules.id,
+              set: item
+            });
+          } catch (e: any) {
+            console.error('Restore: Failed to insert schedule', item.id, e.message);
+          }
+        }
+      }
+
+      // Insert attendance
+      if (attList && Array.isArray(attList)) {
+        for (const item of attList) {
+          try {
+            await db.insert(attendance).values(item).onConflictDoUpdate({
+              target: attendance.id,
+              set: item
+            });
+          } catch (e: any) {
+            console.error('Restore: Failed to insert attendance', item.id, e.message);
+          }
+        }
+      }
+
+      // Insert changes
+      if (changeList && Array.isArray(changeList)) {
+        for (const item of changeList) {
+          try {
+            await db.insert(changeRequests).values(item).onConflictDoUpdate({
+              target: changeRequests.id,
+              set: item
+            });
+          } catch (e: any) {
+            console.error('Restore: Failed to insert change request', item.id, e.message);
+          }
+        }
+      }
+
+      // Insert notifications
+      if (notList && Array.isArray(notList)) {
+        for (const item of notList) {
+          try {
+            await db.insert(systemNotifications).values(item).onConflictDoUpdate({
+              target: systemNotifications.id,
+              set: item
+            });
+          } catch (e: any) {
+            console.error('Restore: Failed to insert notification', item.id, e.message);
+          }
+        }
+      }
+
+      // Insert audit logs
+      if (logList && Array.isArray(logList)) {
+        for (const item of logList) {
+          try {
+            await db.insert(auditLogs).values(item).onConflictDoUpdate({
+              target: auditLogs.id,
+              set: item
+            });
+          } catch (e: any) {
+            console.error('Restore: Failed to insert audit log', item.id, e.message);
+          }
+        }
+      }
+
+      // Insert users
+      if (userList && Array.isArray(userList)) {
+        for (const item of userList) {
+          try {
+            await db.insert(users).values(item).onConflictDoUpdate({
+              target: users.username,
+              set: {
+                password: item.password,
+                role: item.role,
+                teacherId: item.teacherId,
+                permissions: item.permissions,
+                isDeleted: item.isDeleted
+              }
+            });
+          } catch (e: any) {
+            console.error('Restore: Failed to insert user', item.id, e.message);
+          }
+        }
+      }
+
+      // Insert settings
+      if (settingsData) {
+        try {
+          await db.insert(appSettings).values({ id: 'global', ...settingsData }).onConflictDoUpdate({
+            target: appSettings.id,
+            set: settingsData
+          });
+        } catch (e: any) {
+          console.error('Restore: Failed to update app settings', e.message);
+        }
+      }
+
+      console.log('Database restore completed successfully!');
+      res.json({ status: 'success', message: 'Database restored successfully!' });
+    } catch (err: any) {
+      console.error('Failed to restore database:', err);
+      res.status(500).json({ error: 'Failed to restore database', details: err.message });
+    }
+  });
+
+  app.post('/api/parse-public-sheet', async (req, res) => {
+    try {
+      const { spreadsheetId, existingTeachers = [], existingSchools = [] } = req.body;
+      if (!spreadsheetId) {
+        return res.status(400).json({ error: 'Spreadsheet ID is required' });
+      }
+
+      console.log(`Backend fetching and parsing public Google Sheet: ${spreadsheetId}`);
+      const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=xlsx`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Google Sheets export failed: HTTP ${response.status} ${response.statusText}`);
+      }
+      
+      const arrayBuffer = await response.arrayBuffer();
+      const data = new Uint8Array(arrayBuffer);
+      const workbook = XLSX.read(data, { type: 'array' });
+      
+      const allTeachers: any[] = [];
+      const allSchedules: any[] = [];
+      const allSchoolsSet = new Map<string, any>();
+      const allClassesSet = new Map<string, any>();
+      const allWarnings: string[] = [];
+      let previewRows: any[][] | null = null;
+
+      for (const name of workbook.SheetNames) {
+        const sheet = workbook.Sheets[name];
+        const rows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, defval: '' });
+        
+        if (rows && rows.length > 0) {
+          if (!previewRows) {
+            previewRows = rows.slice(0, 10);
+          }
+          
+          const { teachers: docTeachers, warnings: tabWarn } = parseSheetToTeachers(rows, existingTeachers);
+          const specialResult = parseSpecialScheduleSheet(rows, existingSchools, name);
+          const shouldTreatAsSchedule = specialResult.isScheduleSheet;
+
+          if (shouldTreatAsSchedule) {
+            allTeachers.push(...specialResult.teachers);
+            allSchedules.push(...specialResult.schedules);
+            specialResult.schools.forEach(sch => allSchoolsSet.set(sch.id, sch));
+            specialResult.classes.forEach(cls => allClassesSet.set(cls.id, cls));
+          } else {
+            allTeachers.push(...docTeachers);
+            tabWarn.forEach(w => allWarnings.push(`[${name}]: ${w}`));
+          }
+        }
+      }
+
+      res.json({
+        status: 'success',
+        teachers: allTeachers,
+        schedules: allSchedules,
+        schools: Array.from(allSchoolsSet.values()),
+        classes: Array.from(allClassesSet.values()),
+        warnings: allWarnings,
+        previewRows,
+        sheetTabs: workbook.SheetNames
+      });
+    } catch (err: any) {
+      console.error('Failed to parse public sheet:', err);
+      res.status(500).json({ error: 'Failed to parse Google Sheet. Please make sure the sheet is shared as "Anyone with the link can view".', details: err.message });
     }
   });
 
@@ -330,7 +672,14 @@ async function startServer() {
       const schList = (await db.select().from(schools)).sort((a, b) => a.id.localeCompare(b.id));
       const clsList = (await db.select().from(classes)).sort((a, b) => a.id.localeCompare(b.id));
       const skdList = (await db.select().from(schedules)).sort((a, b) => a.id.localeCompare(b.id));
-      const attList = (await db.select().from(attendance)).sort((a, b) => a.id.localeCompare(b.id));
+      const rawAttList = (await db.select().from(attendance)).sort((a, b) => a.id.localeCompare(b.id));
+      const attList = rawAttList.map(att => {
+        const hasSelfie = att.selfieImage && att.selfieImage.length > 0;
+        return {
+          ...att,
+          selfieImage: hasSelfie ? `/api/attendance/${att.id}/selfie` : ''
+        };
+      });
       const changeList = (await db.select().from(changeRequests)).sort((a, b) => a.id.localeCompare(b.id));
       const notList = (await db.select().from(systemNotifications)).sort((a, b) => a.id.localeCompare(b.id));
       const logList = (await db.select().from(auditLogs)).sort((a, b) => a.id.localeCompare(b.id));
@@ -357,7 +706,7 @@ async function startServer() {
       
       let systemSettings = await db.select().from(appSettings).limit(1);
       if (systemSettings.length === 0) {
-        const defaultSettings = { id: 'global', allowTeacherScheduleEdit: false, allowTeacherUpdateSchoolLocation: false };
+        const defaultSettings = { id: 'global', allowTeacherScheduleEdit: false, allowTeacherUpdateSchoolLocation: false, requireSelfieCheckIn: true };
         await db.insert(appSettings).values(defaultSettings);
         systemSettings = [defaultSettings];
       }
@@ -923,8 +1272,48 @@ async function startServer() {
   // ATTENDANCE API
   app.get('/api/attendance', async (req, res) => {
     try {
-      const resList = await db.select().from(attendance);
+      const rawList = await db.select().from(attendance);
+      const resList = rawList.map(att => {
+        const hasSelfie = att.selfieImage && att.selfieImage.length > 0;
+        return {
+          ...att,
+          selfieImage: hasSelfie ? `/api/attendance/${att.id}/selfie` : ''
+        };
+      });
       res.json(resList);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/attendance/:id/selfie', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const record = await db.select({ selfieImage: attendance.selfieImage })
+        .from(attendance)
+        .where(eq(attendance.id, id))
+        .limit(1);
+      
+      if (record.length === 0 || !record[0].selfieImage) {
+        return res.status(404).send('Not found');
+      }
+
+      const img = record[0].selfieImage;
+      if (img.startsWith('data:image/')) {
+        const matches = img.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-+.]+);base64,(.*)$/);
+        if (matches && matches.length === 3) {
+          const contentType = matches[1];
+          const base64Data = matches[2];
+          const buffer = Buffer.from(base64Data, 'base64');
+          res.setHeader('Content-Type', contentType);
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          return res.send(buffer);
+        }
+      }
+
+      // Fallback if not a data URI
+      res.setHeader('Content-Type', 'text/plain');
+      res.send(img);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

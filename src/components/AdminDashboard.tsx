@@ -6,10 +6,11 @@ import {
   Users, Building, Calendar, DollarSign, FileSpreadsheet, FileText, 
   Plus, Edit2, Trash2, GripVertical, Check, X, ShieldAlert, MapPin, QrCode, 
   Clock, ArrowLeftRight, Search, Printer, RefreshCw, AlertTriangle, Eye, CheckCircle2,
-  ShieldCheck, Download, Upload
+  ShieldCheck, Download, Upload, Activity, Camera
 } from 'lucide-react';
 import { Teacher, School, ClassInfo, Schedule, AttendanceLog, ChangeRequest, AuditLog, SystemNotification, AppUser, AppSettings, MeetingAttendance } from '../types';
 import SheetsSyncModal from './SheetsSyncModal';
+import SystemHealth from './SystemHealth';
 
 const AVAILABLE_PERMISSIONS = [
   { value: 'can_view_all_teachers', label: 'Xem hồ sơ & thù lao tất cả giáo viên' },
@@ -446,7 +447,7 @@ export default function AdminDashboard({
     }
   };
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'schedules' | 'teachers' | 'schools' | 'attendance' | 'changes' | 'reports' | 'logs' | 'trash' | 'accounts' | 'meeting_attendance'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'schedules' | 'teachers' | 'schools' | 'attendance' | 'changes' | 'reports' | 'logs' | 'trash' | 'accounts' | 'meeting_attendance' | 'system_health'>('dashboard');
   const [dashboardHistoryYear, setDashboardHistoryYear] = useState<string>('2026');
   const [dashboardHistoryMonth, setDashboardHistoryMonth] = useState<string>('06');
   const [trashCategory, setTrashCategory] = useState<'schedules' | 'teachers' | 'schools' | 'classes'>('schedules');
@@ -466,6 +467,7 @@ export default function AdminDashboard({
   };
 
   const randomKeyMap = useRef<Record<string, number>>({});
+  const hasDroppedRef = useRef(false);
   const getRandomKey = (scheduleId: string) => {
     if (!randomKeyMap.current[scheduleId]) {
       randomKeyMap.current[scheduleId] = Math.random();
@@ -496,6 +498,238 @@ export default function AdminDashboard({
   // Change request states
   const [editingChange, setEditingChange] = useState<Partial<ChangeRequest> | null>(null);
   const [showChangeModal, setShowChangeModal] = useState(false);
+
+  // Drag and Drop States
+  const [draggedSchedule, setDraggedSchedule] = useState<Schedule | null>(null);
+  const [dragOverCell, setDragOverCell] = useState<{ dayOfWeek: number; session: 'morning' | 'afternoon' | 'evening' } | null>(null);
+  const [showDragActionModal, setShowDragActionModal] = useState(false);
+  const [dragDropTarget, setDragDropTarget] = useState<{ dayOfWeek: number; session: 'morning' | 'afternoon' | 'evening' } | null>(null);
+  const [dragTransferTeacherId, setDragTransferTeacherId] = useState<string>('');
+
+  // HTML5 Drag and Drop handlers
+  const handleDragStart = (e: React.DragEvent, schedule: Schedule) => {
+    try {
+      hasDroppedRef.current = false;
+      if (e.dataTransfer) {
+        e.dataTransfer.setData('text/plain', schedule.id);
+        e.dataTransfer.effectAllowed = 'copyMove';
+      }
+      setDraggedSchedule(schedule);
+      
+      const element = e.currentTarget as HTMLElement;
+      if (element && element.classList) {
+        // Using setTimeout prevents Chrome from aborting the drag due to immediate styling modifications during the layout capture
+        setTimeout(() => {
+          try {
+            element.classList.add('opacity-40');
+          } catch (err) {
+            console.error('Error adding opacity class:', err);
+          }
+        }, 0);
+      }
+    } catch (err) {
+      console.error('Error in handleDragStart:', err);
+    }
+  };
+
+  const handleDragEnd = (e: React.DragEvent) => {
+    try {
+      const element = e.currentTarget as HTMLElement;
+      if (element && element.classList) {
+        element.classList.remove('opacity-40');
+      }
+    } catch (err) {
+      console.error('Error in handleDragEnd:', err);
+    } finally {
+      setDragOverCell(null);
+      // Wait slightly to check if a valid drop occurred. If not, clear draggedSchedule.
+      setTimeout(() => {
+        if (!hasDroppedRef.current) {
+          setDraggedSchedule(null);
+        }
+      }, 50);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent, dayOfWeek: number, session: 'morning' | 'afternoon' | 'evening') => {
+    try {
+      e.preventDefault(); // Required to allow drop
+      if (dragOverCell?.dayOfWeek !== dayOfWeek || dragOverCell?.session !== session) {
+        setDragOverCell({ dayOfWeek, session });
+      }
+    } catch (err) {
+      console.error('Error in handleDragOver:', err);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    try {
+      e.preventDefault();
+    } catch (err) {
+      console.error('Error in handleDragLeave:', err);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent, dayOfWeek: number, session: 'morning' | 'afternoon' | 'evening') => {
+    try {
+      e.preventDefault();
+      hasDroppedRef.current = true;
+      setDragOverCell(null);
+      if (!draggedSchedule) return;
+
+      setDragDropTarget({ dayOfWeek, session });
+      setDragTransferTeacherId(draggedSchedule.teacherId); // Default to current teacher
+      setShowDragActionModal(true);
+    } catch (err) {
+      console.error('Error in handleDrop:', err);
+    }
+  };
+
+  const confirmDragAction = (actionType: 'move' | 'copy' | 'transfer', options?: { newTeacherId?: string; isCopy?: boolean }) => {
+    if (!draggedSchedule || !dragDropTarget) return;
+
+    let newSchedules = [...schedules];
+
+    if (actionType === 'move') {
+      // 1. Check for schedule conflicts on the same teacher at target day/session
+      const hasConflict = newSchedules.some(s => 
+        s.id !== draggedSchedule.id &&
+        s.teacherId === draggedSchedule.teacherId &&
+        s.dayOfWeek === dragDropTarget.dayOfWeek &&
+        s.session === dragDropTarget.session &&
+        !s.isDeleted
+      );
+
+      if (hasConflict) {
+        customConfirm(
+          'Trùng lịch giảng dạy',
+          `Giáo viên "${getTeacherName(draggedSchedule.teacherId)}" đã có lịch bận vào Thứ ${dragDropTarget.dayOfWeek} ca ${dragDropTarget.session === 'morning' ? 'sáng' : 'chiều'}. Bạn vẫn muốn chuyển chứ?`,
+          () => {
+            executeMove();
+          }
+        );
+        return;
+      }
+
+      executeMove();
+
+      function executeMove() {
+        newSchedules = newSchedules.map(s => {
+          if (s.id === draggedSchedule.id) {
+            return {
+              ...s,
+              dayOfWeek: dragDropTarget.dayOfWeek,
+              session: dragDropTarget.session
+            };
+          }
+          return s;
+        });
+        onUpdateSchedules(newSchedules);
+        onAddNotification('Di chuyển thành công 📅', `Đã chuyển tiết dạy sang thứ ${dragDropTarget.dayOfWeek} - Ca ${dragDropTarget.session === 'morning' ? 'Sáng' : 'Chiều'}`, 'success');
+        closeDragModal();
+      }
+
+    } else if (actionType === 'copy') {
+      // Create copy of the schedule with new ID
+      const newSchedule: Schedule = {
+        ...draggedSchedule,
+        id: `SKD_DYN_${Math.random().toString(16).slice(2, 10).toUpperCase()}`,
+        dayOfWeek: dragDropTarget.dayOfWeek,
+        session: dragDropTarget.session,
+        isDeleted: false
+      };
+
+      const hasConflict = newSchedules.some(s => 
+        s.teacherId === draggedSchedule.teacherId &&
+        s.dayOfWeek === dragDropTarget.dayOfWeek &&
+        s.session === dragDropTarget.session &&
+        !s.isDeleted
+      );
+
+      if (hasConflict) {
+        customConfirm(
+          'Trùng lịch giảng dạy',
+          `Giáo viên "${getTeacherName(draggedSchedule.teacherId)}" đã có lịch bận vào ngày giờ này. Bạn vẫn muốn sao chép chứ?`,
+          () => {
+            executeCopy();
+          }
+        );
+        return;
+      }
+
+      executeCopy();
+
+      function executeCopy() {
+        newSchedules.push(newSchedule);
+        onUpdateSchedules(newSchedules);
+        onAddNotification('Sao chép thành công 📋', `Đã nhân bản tiết học sang thứ ${dragDropTarget.dayOfWeek} - Ca ${dragDropTarget.session === 'morning' ? 'Sáng' : 'Chiều'}`, 'success');
+        closeDragModal();
+      }
+
+    } else if (actionType === 'transfer') {
+      const targetTeacherId = options?.newTeacherId || dragTransferTeacherId;
+      const isCopyMode = options?.isCopy || false;
+
+      if (!targetTeacherId) return;
+
+      const hasConflict = newSchedules.some(s => 
+        s.teacherId === targetTeacherId &&
+        s.dayOfWeek === dragDropTarget.dayOfWeek &&
+        s.session === dragDropTarget.session &&
+        !s.isDeleted
+      );
+
+      if (hasConflict) {
+        customConfirm(
+          'Trùng lịch giảng dạy',
+          `Giáo viên đích "${getTeacherName(targetTeacherId)}" đã có lịch bận vào ngày giờ này. Bạn vẫn muốn tiếp tục chứ?`,
+          () => {
+            executeTransfer();
+          }
+        );
+        return;
+      }
+
+      executeTransfer();
+
+      function executeTransfer() {
+        if (isCopyMode) {
+          const newSchedule: Schedule = {
+            ...draggedSchedule,
+            id: `SKD_DYN_${Math.random().toString(16).slice(2, 10).toUpperCase()}`,
+            dayOfWeek: dragDropTarget.dayOfWeek,
+            session: dragDropTarget.session,
+            teacherId: targetTeacherId,
+            isDeleted: false
+          };
+          newSchedules.push(newSchedule);
+          onAddNotification('Sao chép sang giáo viên khác 👤', `Đã nhân bản tiết học cho giáo viên "${getTeacherName(targetTeacherId)}"`, 'success');
+        } else {
+          newSchedules = newSchedules.map(s => {
+            if (s.id === draggedSchedule.id) {
+              return {
+                ...s,
+                dayOfWeek: dragDropTarget.dayOfWeek,
+                session: dragDropTarget.session,
+                teacherId: targetTeacherId
+              };
+            }
+            return s;
+          });
+          onAddNotification('Chuyển giáo viên thành công 👤', `Đã chuyển hẳn tiết học cho giáo viên "${getTeacherName(targetTeacherId)}"`, 'success');
+        }
+        onUpdateSchedules(newSchedules);
+        closeDragModal();
+      }
+    }
+  };
+
+  const closeDragModal = () => {
+    setShowDragActionModal(false);
+    setDraggedSchedule(null);
+    setDragDropTarget(null);
+    hasDroppedRef.current = false;
+  };
 
   // Attendance View states
   const [attendanceDate, setAttendanceDate] = useState<string>((`${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`));
@@ -594,16 +828,16 @@ export default function AdminDashboard({
                 settings: jsonData.settings || settings || { id: 'global', allowTeacherScheduleEdit: false }
               });
 
-              // 2. Perform background bulk push to reset PostgreSQL remote instance
+              // 2. Perform background bulk push to restore PostgreSQL instance atomically
               try {
-                // Bulk wipe first
-                await fetch('/api/db-wipe', { method: 'DELETE' });
-                // Push full state
-                await fetch('/api/sync-bulk', {
+                const restoreResponse = await fetch('/api/db-restore', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify(jsonData)
                 });
+                if (!restoreResponse.ok) {
+                  throw new Error('Database restore request failed');
+                }
               } catch(e) {
                 console.error('Failed to sync backend PostgreSQL over import:', e);
               }
@@ -1501,7 +1735,7 @@ export default function AdminDashboard({
     if (reportType === 'payroll') {
       csvContent += "Mã GV,Tên Giáo Viên,Số Tiết Dạy,Đơn Giá,Phụ Cấp Xăng Xe,Thưởng Chuyên Cần,BHXH,Ứng Lương,Phạt,Lương Thực Nhận (VND)\n";
       reportTeachers.forEach(t => {
-        const tLogs = rawAttendance.filter(a => !a.isDeleted && a.teacherId === t.id && a.date.startsWith(reportMonth) && (a.confirmedByAdmin || a.isVerified));
+        const tLogs = rawAttendance.filter(a => a.teacherId === t.id && a.date.startsWith(reportMonth) && (a.confirmedByAdmin || a.isVerified));
                 const substituteLogs = tLogs.filter(log => {
           const sched = rawSchedules.find(s => !s.isDeleted && s.id === log.scheduleId);
           return sched && sched.teacherId !== t.id;
@@ -1669,6 +1903,7 @@ export default function AdminDashboard({
           (currentUser?.role === 'admin' || hasPermission('can_view_reports') || !!currentUser?.teacherId) ? { id: 'reports', label: 'Bảng Lương & Chi Phí', icon: DollarSign } : null,
           (currentUser?.role === 'admin' || hasPermission('can_view_audit_logs')) ? { id: 'logs', label: 'Nhật Ký Audit', icon: FileText } : null,
           currentUser?.role === 'admin' ? { id: 'accounts', label: 'Cấp Quyền / Tài Khoản', icon: ShieldCheck } : null,
+          currentUser?.role === 'admin' ? { id: 'system_health', label: 'Sức Khỏe Hệ Thống', icon: Activity } : null,
           currentUser?.role === 'admin' ? { id: 'trash', label: 'Thùng Rác', icon: Trash2, count: rawSchedules.filter(s => s.isDeleted).length + rawTeachers.filter(t => t.isDeleted).length + rawSchools.filter(s => s.isDeleted).length + rawClasses.filter(c => c.isDeleted).length } : null
         ].filter(Boolean) as any[]).map((tab) => {
           const Icon = tab.icon;
@@ -1808,6 +2043,36 @@ export default function AdminDashboard({
                       className={`relative inline-flex h-7 w-14 items-center rounded-full transition-colors shrink-0 ml-4 ${settings?.allowTeacherUpdateSchoolLocation ? 'bg-emerald-600' : 'bg-slate-300'}`}
                     >
                       <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${settings?.allowTeacherUpdateSchoolLocation ? 'translate-x-8' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-white border text-left border-slate-100 rounded-2xl p-6 shadow-sm flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className={`p-3.5 rounded-xl ${settings?.requireSelfieCheckIn !== false ? 'bg-rose-50 text-rose-600' : 'bg-slate-50 text-slate-400'}`}>
+                      <Camera className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-slate-800 text-base">Điểm Danh Bằng Selfie (Ảnh Chụp)</h3>
+                      <p className="text-xs text-slate-500 mt-1">Yêu cầu giáo viên chụp ảnh selfie thực tế tại lớp. Khi tắt, giáo viên chỉ cần ấn "Điểm Danh" là xong.</p>
+                    </div>
+                  </div>
+                  <div>
+                    <button
+                      onClick={() => {
+                        if (onUpdateSettings) {
+                          const nextSettings = settings ? { ...settings, requireSelfieCheckIn: settings.requireSelfieCheckIn === false ? true : false } : { id: 'global', allowTeacherScheduleEdit: false, requireSelfieCheckIn: false };
+                          onUpdateSettings(nextSettings);
+                          onAddAuditLog(
+                            nextSettings.requireSelfieCheckIn !== false ? 'Bật bắt buộc chụp Selfie' : 'Tắt bắt buộc chụp Selfie',
+                            currentUser?.username || 'Admin',
+                            `Thay đổi yêu cầu chụp ảnh selfie khi điểm danh sang: ${nextSettings.requireSelfieCheckIn !== false ? 'Bắt buộc' : 'Không bắt buộc'}`
+                          );
+                        }
+                      }}
+                      className={`relative inline-flex h-7 w-14 items-center rounded-full transition-colors shrink-0 ml-4 ${settings?.requireSelfieCheckIn !== false ? 'bg-rose-600' : 'bg-slate-300'}`}
+                    >
+                      <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${settings?.requireSelfieCheckIn !== false ? 'translate-x-8' : 'translate-x-1'}`} />
                     </button>
                   </div>
                 </div>
@@ -2133,6 +2398,8 @@ export default function AdminDashboard({
         )}
 
         {/* ----------------TAB 2: TEACHING SCHEDULES (CALENDAR BUILDER) ---------------- */}
+        {activeTab === 'system_health' && <SystemHealth />}
+
         {activeTab === 'schedules' && (
           <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6 animate-fadeIn" id="schedules_tab">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
@@ -2214,6 +2481,22 @@ export default function AdminDashboard({
               </div>
             </div>
 
+            {draggedSchedule && (
+              <div className="p-3 bg-blue-50 border border-blue-200 text-blue-800 rounded-xl text-xs font-semibold animate-pulse mb-3 flex items-center justify-between shadow-2xs">
+                <span className="flex items-center gap-1.5">
+                  <span className="inline-block h-2 w-2 rounded-full bg-blue-600 animate-ping" />
+                  ⚡ Đang kéo lịch dạy của: <strong>{getTeacherName(draggedSchedule.teacherId)}</strong> - Hãy thả vào ô Ca Sáng/Ca Chiều của cột ngày khác để đổi lịch.
+                </span>
+                <button 
+                  type="button" 
+                  onClick={() => { setDraggedSchedule(null); setDragOverCell(null); }}
+                  className="px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-800 rounded text-[10px] cursor-pointer font-bold transition"
+                >
+                  Hủy kéo
+                </button>
+              </div>
+            )}
+
             {/* Desktop Visual Grid / Calendar-style layout */}
             <div className="overflow-x-auto border border-slate-100 rounded-xl">
               <table className="w-full border-collapse text-left text-sm table-fixed min-w-[800px]">
@@ -2240,8 +2523,15 @@ export default function AdminDashboard({
                         getSessionType(s.session) === 'morning' &&
                         (scheduleTeacherFilter === 'all' || s.teacherId === scheduleTeacherFilter)
                       ).sort((a, b) => getWeight(a.session) - getWeight(b.session));
+                      const isOver = dragOverCell?.dayOfWeek === day.num && dragOverCell?.session === 'morning';
                       return (
-                        <td key={day.num} className="p-2 border-r border-slate-100 hover:bg-slate-50/50 transition min-h-32">
+                        <td 
+                          key={day.num} 
+                          className={`p-2 border-r border-slate-100 transition min-h-32 ${isOver ? 'bg-blue-50/80 border-2 border-dashed border-blue-400' : 'hover:bg-slate-50/50'}`}
+                          onDragOver={(e) => handleDragOver(e, day.num, 'morning')}
+                          onDragLeave={handleDragLeave}
+                          onDrop={(e) => handleDrop(e, day.num, 'morning')}
+                        >
                           <div className="space-y-2">
                             {cells.map(s => {
                               const schedule = {
@@ -2250,19 +2540,27 @@ export default function AdminDashboard({
                                 shift: s.session
                               };
                               return (
-                                <div key={`sch-${s.id}`} className="p-2 bg-blue-50/70 border border-blue-100 rounded-lg text-xs space-y-1 relative group">
+                                <div 
+                                  key={`sch-${s.id}`} 
+                                  draggable="true"
+                                  onDragStart={(e) => handleDragStart(e, s)}
+                                  onDragEnd={handleDragEnd}
+                                  className="p-2 bg-blue-50/70 border border-blue-100 rounded-lg text-xs space-y-1 relative group cursor-grab active:cursor-grabbing hover:shadow-xs transition select-none"
+                                >
                                   <div className="flex items-center justify-between">
                                     <strong className="text-blue-900 block font-bold leading-tight">{getTeacherName(s.teacherId)}</strong>
                                     <div className="opacity-0 group-hover:opacity-100 transition absolute right-1.5 top-1.5 bg-white shadow rounded flex items-center border border-slate-100">
                                       <button 
+                                        type="button"
                                         onClick={() => { setEditingSchedule({ ...s, originalId: s.id }); setShowScheduleModal(true); }}
-                                        className="p-1 hover:text-blue-600 text-slate-400 hover:bg-slate-50 rounded-l"
+                                        className="p-1 hover:text-blue-600 text-slate-400 hover:bg-slate-50 rounded-l cursor-pointer"
                                       >
                                         <Edit2 className="h-3 w-3" />
                                       </button>
                                       <button 
+                                        type="button"
                                         onClick={() => handleDeleteSchedule(s.id)}
-                                        className="p-1 hover:text-red-600 text-slate-400 hover:bg-slate-50 rounded-r border-l border-slate-100"
+                                        className="p-1 hover:text-red-600 text-slate-400 hover:bg-slate-50 rounded-r border-l border-slate-100 cursor-pointer"
                                       >
                                         <Trash2 className="h-3 w-3" />
                                       </button>
@@ -2284,7 +2582,7 @@ export default function AdminDashboard({
                                 });
                                 setShowScheduleModal(true);
                               }}
-                              className="w-full border border-dashed border-slate-200 hover:border-slate-400 hover:bg-white text-slate-400 hover:text-slate-600 transition p-1.5 rounded-lg text-center text-xs flex items-center justify-center gap-1 font-medium"
+                              className="w-full border border-dashed border-slate-200 hover:border-slate-400 hover:bg-white text-slate-400 hover:text-slate-600 transition p-1.5 rounded-lg text-center text-xs flex items-center justify-center gap-1 font-medium cursor-pointer"
                             >
                               <Plus className="h-3 w-3" /> Gán
                             </button>
@@ -2308,8 +2606,15 @@ export default function AdminDashboard({
                         getSessionType(s.session) === 'afternoon' &&
                         (scheduleTeacherFilter === 'all' || s.teacherId === scheduleTeacherFilter)
                       ).sort((a, b) => getWeight(a.session) - getWeight(b.session));
+                      const isOver = dragOverCell?.dayOfWeek === day.num && dragOverCell?.session === 'afternoon';
                       return (
-                        <td key={day.num} className="p-2 border-r border-slate-100 hover:bg-slate-50/50 transition min-h-32">
+                        <td 
+                          key={day.num} 
+                          className={`p-2 border-r border-slate-100 transition min-h-32 ${isOver ? 'bg-violet-50/80 border-2 border-dashed border-violet-400' : 'hover:bg-slate-50/50'}`}
+                          onDragOver={(e) => handleDragOver(e, day.num, 'afternoon')}
+                          onDragLeave={handleDragLeave}
+                          onDrop={(e) => handleDrop(e, day.num, 'afternoon')}
+                        >
                           <div className="space-y-2">
                             {cells.map(s => {
                               const schedule = {
@@ -2318,19 +2623,27 @@ export default function AdminDashboard({
                                 shift: s.session
                               };
                               return (
-                                <div key={`sch-${s.id}`} className="p-2 bg-violet-50/70 border border-violet-100 rounded-lg text-xs space-y-1 relative group">
+                                <div 
+                                  key={`sch-${s.id}`} 
+                                  draggable="true"
+                                  onDragStart={(e) => handleDragStart(e, s)}
+                                  onDragEnd={handleDragEnd}
+                                  className="p-2 bg-violet-50/70 border border-violet-100 rounded-lg text-xs space-y-1 relative group cursor-grab active:cursor-grabbing hover:shadow-xs transition select-none"
+                                >
                                   <div className="flex items-center justify-between">
                                     <strong className="text-violet-900 block font-bold leading-tight">{getTeacherName(s.teacherId)}</strong>
                                     <div className="opacity-0 group-hover:opacity-100 transition absolute right-1.5 top-1.5 bg-white shadow rounded flex items-center border border-slate-100">
                                       <button 
+                                        type="button"
                                         onClick={() => { setEditingSchedule({ ...s, originalId: s.id }); setShowScheduleModal(true); }}
-                                        className="p-1 hover:text-violet-600 text-slate-400 hover:bg-slate-50 rounded-l"
+                                        className="p-1 hover:text-violet-600 text-slate-400 hover:bg-slate-50 rounded-l cursor-pointer"
                                       >
                                         <Edit2 className="h-3 w-3" />
                                       </button>
                                       <button 
+                                        type="button"
                                         onClick={() => handleDeleteSchedule(s.id)}
-                                        className="p-1 hover:text-red-600 text-slate-400 hover:bg-slate-50 rounded-r border-l border-slate-100"
+                                        className="p-1 hover:text-red-600 text-slate-400 hover:bg-slate-50 rounded-r border-l border-slate-100 cursor-pointer"
                                       >
                                         <Trash2 className="h-3 w-3" />
                                       </button>
@@ -2352,7 +2665,7 @@ export default function AdminDashboard({
                                 });
                                 setShowScheduleModal(true);
                               }}
-                              className="w-full border border-dashed border-slate-200 hover:border-slate-400 hover:bg-white text-slate-400 hover:text-slate-600 transition p-1.5 rounded-lg text-center text-xs flex items-center justify-center gap-1 font-medium"
+                              className="w-full border border-dashed border-slate-200 hover:border-slate-400 hover:bg-white text-slate-400 hover:text-slate-600 transition p-1.5 rounded-lg text-center text-xs flex items-center justify-center gap-1 font-medium cursor-pointer"
                             >
                               <Plus className="h-3 w-3" /> Gán
                             </button>
@@ -3152,7 +3465,7 @@ export default function AdminDashboard({
                         })
                         .map((teacher: any) => {
                           // Filter attendance logs of this teacher that are within selected month AND confirmed or verified
-                          const tLogs = rawAttendance.filter((a: any) => !a.isDeleted && a.teacherId === teacher.id && a.date.startsWith(reportMonth) && (a.confirmedByAdmin || a.isVerified));
+                          const tLogs = rawAttendance.filter((a: any) => a.teacherId === teacher.id && a.date.startsWith(reportMonth) && (a.confirmedByAdmin || a.isVerified));
                           
                           const approvedSubRequests = rawChanges.filter((c: any) => c.status === 'approved' && c.targetTeacherId === teacher.id && c.date.startsWith(reportMonth));
                                                     const substituteLogs = tLogs.filter((log: any) => {
@@ -4153,6 +4466,91 @@ export default function AdminDashboard({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* MODAL: DRAG ACTION SELECTION MODAL */}
+      {/* ------------------------------------------------------------- */}
+      {showDragActionModal && draggedSchedule && dragDropTarget && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-55 overflow-y-auto">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl space-y-4 my-8 text-left text-xs">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+              <h4 className="font-bold text-slate-800 text-sm">
+                Xử lý kéo thả lịch dạy
+              </h4>
+              <button 
+                type="button"
+                onClick={closeDragModal}
+                className="text-slate-400 hover:text-slate-650 cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="bg-slate-50 p-3 rounded-xl space-y-1.5 text-slate-700 leading-normal border border-slate-100">
+              <p><strong>Giáo viên:</strong> {getTeacherName(draggedSchedule.teacherId)}</p>
+              <p><strong>Lớp:</strong> {getClassName(draggedSchedule.classId)}</p>
+              <p><strong>Trường:</strong> {getSchoolName(draggedSchedule.schoolId, draggedSchedule)}</p>
+              <p className="pt-1.5 border-t border-slate-200/50 text-[10px] text-slate-450">
+                Kéo từ: Thứ {draggedSchedule.dayOfWeek} ({getSessionType(draggedSchedule.session) === 'morning' ? 'Ca Sáng' : 'Ca Chiều'})
+              </p>
+              <p className="text-[10px] text-blue-600 font-semibold">
+                Thả tới: Thứ {dragDropTarget.dayOfWeek} ({dragDropTarget.session === 'morning' ? 'Ca Sáng' : 'Ca Chiều'})
+              </p>
+            </div>
+
+            <div className="space-y-3 pt-2">
+              <button
+                type="button"
+                onClick={() => confirmDragAction('move')}
+                className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-xs transition active:scale-98 flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                Di chuyển lịch dạy này
+              </button>
+
+              <button
+                type="button"
+                onClick={() => confirmDragAction('copy')}
+                className="w-full py-2.5 px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold rounded-xl shadow-2xs transition active:scale-98 flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                Sao chép lịch (Tạo bản sao mới)
+              </button>
+
+              <div className="border-t border-slate-100 pt-3 space-y-2">
+                <label className="font-bold text-slate-500 block">Hoặc chuyển / sao chép cho giáo viên khác:</label>
+                <select
+                  value={dragTransferTeacherId}
+                  onChange={e => setDragTransferTeacherId(e.target.value)}
+                  className="w-full p-2.5 border border-slate-200 rounded-xl bg-white text-slate-800 focus:outline-none"
+                >
+                  <option value="" disabled>Chọn giáo viên nhận lịch...</option>
+                  {teachers.map(t => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button
+                    type="button"
+                    disabled={!dragTransferTeacherId}
+                    onClick={() => confirmDragAction('transfer', { newTeacherId: dragTransferTeacherId, isCopy: false })}
+                    className="py-2 px-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl transition cursor-pointer disabled:opacity-50"
+                  >
+                    Chuyển hẳn
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!dragTransferTeacherId}
+                    onClick={() => confirmDragAction('transfer', { newTeacherId: dragTransferTeacherId, isCopy: true })}
+                    className="py-2 px-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-xl transition cursor-pointer disabled:opacity-50"
+                  >
+                    Sao chép sang
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

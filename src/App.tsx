@@ -178,22 +178,10 @@ export default function App() {
   // Startup useEffect: Fetch PostgreSQL state on initialization & poll for updates to keep frontend in perfect sync with the DB
   useEffect(() => {
     let currentServerVersion: string | null = null;
+    let lastKnownTimestamp = 0;
 
     const fetchLatestState = async () => {
       try {
-        // Check server version to force reload if there is a new deployment
-        const versionResponse = await fetch('/api/version', { cache: 'no-store' });
-        if (versionResponse.ok) {
-           const { version } = await versionResponse.json();
-           if (!currentServerVersion) {
-              currentServerVersion = version;
-           } else if (currentServerVersion !== version) {
-              console.log('New version detected, reloading...');
-              window.location.reload();
-              return;
-           }
-        }
-
         const response = await fetch('/api/state', { 
           cache: 'no-store',
           headers: { 'x-app-version': '2' }
@@ -201,7 +189,6 @@ export default function App() {
         if (response.ok) {
           const dbState = await response.json();
           if (dbState && dbState.teachers) {
-            // Ensure permissions are parsed properly
             if (dbState.users && Array.isArray(dbState.users)) {
               dbState.users = dbState.users.map((u: any) => {
                 let parsed = [];
@@ -218,87 +205,57 @@ export default function App() {
               });
             }
             
-            setState(prev => {
-              if (JSON.stringify(prev) !== JSON.stringify(dbState)) {
-                 saveStoredData(dbState);
-                 return dbState;
-              }
-              return prev;
-            });
-            
-            // Sync current user's permissions dynamically so they don't have to re-login
-            setCurrentUser(prevUser => {
-              if (prevUser && dbState.users) {
-                const latestUser = dbState.users.find((u: any) => u.username === prevUser.username);
-                if (latestUser) {
-                  const currentPermsStr = JSON.stringify(prevUser.permissions || []);
-                  const latestPermsStr = JSON.stringify(latestUser.permissions || []);
-                  if (currentPermsStr !== latestPermsStr || prevUser.role !== latestUser.role) {
-                    const nextUser = { ...prevUser, role: latestUser.role, permissions: latestUser.permissions };
-                    localStorage.setItem('etms_current_user', JSON.stringify(nextUser));
-                    
-                    // Note: viewMode might need to be re-evaluated if it was 'teacher' but now they have admin access
-                    // We'll let the user manually click 'Chỉ Hiện Web Admin' if the button appears,
-                    // but we can also auto-switch if they just gained admin access.
-                    setViewMode(currentViewMode => {
-                      if (currentViewMode === 'teacher' && latestUser.role !== 'member') return 'admin';
-                      if (currentViewMode === 'teacher' && latestUser.permissions?.length > 0) return 'admin';
-                      return currentViewMode;
-                    });
-                    
-                    return nextUser;
-                  }
-                }
-              }
-              return prevUser;
-            });
-            
-            return;
+            setState(dbState);
+            saveStoredData(dbState);
           }
         }
       } catch (err) {
-        console.error("Error loading DB state, falling back to local cache:", err);
+        console.error('Failed to fetch state from API', err);
       }
     };
 
-    // Initial load with offline recovery fallback
+    const pollForChanges = async () => {
+      try {
+        const res = await fetch('/api/state/timestamp', { cache: 'no-store' });
+        if (res.ok) {
+           const { timestamp, version } = await res.json();
+           if (!currentServerVersion) {
+              currentServerVersion = version;
+           } else if (currentServerVersion !== version) {
+              console.log('New version detected, reloading...');
+              window.location.reload();
+              return;
+           }
+
+           if (timestamp !== lastKnownTimestamp) {
+              lastKnownTimestamp = timestamp;
+              await fetchLatestState();
+           }
+        }
+      } catch (err) {
+        // ignore
+      }
+    };
+
+    const checkDatabaseHealth = async (): Promise<boolean> => {
+      try {
+        const res = await fetch('/api/health');
+        if (res.ok) {
+          const data = await res.json();
+          return data.status === 'ok';
+        }
+        return false;
+      } catch (e) {
+        return false;
+      }
+    };
+
     const initialLoad = async () => {
+       setIsInitialLoad(true);
        try {
-         const response = await fetch('/api/state', { 
-           cache: 'no-store',
-           headers: { 'x-app-version': '2' }
-         });
-         if (response.ok) {
-            const dbState = await response.json();
-            const localState = getStoredData();
-            
-            // OFF-LINE RECOVERY: Push offline records from localState to DB before overwriting
-            if (localState) {
-               if (localState.attendance && dbState.attendance) {
-                 const dbIds = new Set(dbState.attendance.map((a: any) => a.id));
-                 const offlineRecords = localState.attendance.filter((a: any) => !dbIds.has(a.id));
-                 if (offlineRecords.length > 0) {
-                    await fetch('/api/attendance/bulk', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ upsert: offlineRecords, remove: [] })
-                    }).catch(console.error);
-                 }
-               }
-               if (localState.changes && dbState.changes) {
-                 const dbIds = new Set(dbState.changes.map((a: any) => a.id));
-                 const offlineRecords = localState.changes.filter((a: any) => !dbIds.has(a.id));
-                 if (offlineRecords.length > 0) {
-                    await fetch('/api/changes/bulk', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ upsert: offlineRecords, remove: [] })
-                    }).catch(console.error);
-                 }
-               }
-            }
-            
-            await fetchLatestState();
+         const hasData = await checkDatabaseHealth();
+         if (hasData) {
+            await pollForChanges();
          } else {
             setState(getStoredData());
          }
@@ -311,8 +268,8 @@ export default function App() {
     
     initialLoad();
 
-    // Set up real-time polling every 5 seconds (auto-refresh cross-device)
-    const intervalId = setInterval(fetchLatestState, 5000);
+    // Set up real-time polling every 5 seconds using lightweight timestamp endpoint
+    const intervalId = setInterval(pollForChanges, 5000);
     
     // Also listen for cross-tab local storage changes (if users have multiple tabs in same browser)
     const handleStorageChange = () => {
@@ -659,15 +616,15 @@ export default function App() {
     updatedSchedules: Schedule[],
     mode: 'overwrite' | 'update'
   ) => {
-    let finalTeachers = [...state.teachers];
-    let finalSchools = [...state.schools];
-    let finalClasses = [...state.classes];
-    let finalSchedules = [...state.schedules];
+    let finalTeachers = mode === 'overwrite' ? [] : [...state.teachers];
+    let finalSchools = mode === 'overwrite' ? [] : [...state.schools];
+    let finalClasses = mode === 'overwrite' ? [] : [...state.classes];
+    let finalSchedules = mode === 'overwrite' ? [] : [...state.schedules];
 
-    // Cache deleted names/IDs so we never mistakenly restore soft-deleted items
-    const deletedSchoolNames = new Set(state.schools.filter(s => s.isDeleted).map(s => s.name.toLowerCase()));
-    const deletedClassNames = new Set(state.classes.filter(c => c.isDeleted).map(c => c.name.toLowerCase()));
-    const deletedTeacherNames = new Set(state.teachers.filter(t => t.isDeleted).map(t => t.name.toLowerCase()));
+    // Cache deleted names/IDs so we never mistakenly restore soft-deleted items (ONLY if updating)
+    const deletedSchoolNames = new Set(mode === 'update' ? state.schools.filter(s => s.isDeleted).map(s => s.name.toLowerCase()) : []);
+    const deletedClassNames = new Set(mode === 'update' ? state.classes.filter(c => c.isDeleted).map(c => c.name.toLowerCase()) : []);
+    const deletedTeacherNames = new Set(mode === 'update' ? state.teachers.filter(t => t.isDeleted).map(t => t.name.toLowerCase()) : []);
     
     const normalizeBoolean = (val: any) => {
        if (typeof val === 'boolean') return val;
@@ -688,9 +645,6 @@ export default function App() {
 
     // Merge teachers FIRST so we have the correct IDs for schedule mapping
     const teacherIdMap = new Map<string, string>();
-    if (mode === 'overwrite') {
-      finalTeachers = finalTeachers.map(t => ({ ...t, isDeleted: true }));
-    }
     processTeachers.forEach(imported => {
       const importSlug = imported.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, '');
       const idx = finalTeachers.findIndex(t => {
@@ -731,13 +685,10 @@ export default function App() {
     const classIdMap = new Map<string, string>();
 
     if (mode === 'overwrite') {
-      // Mark schools, classes, schedules as deleted only if they are present in the update payload
-      if (updatedSchools.length > 0) finalSchools = finalSchools.map(s => ({ ...s, isDeleted: true }));
-      if (updatedClasses.length > 0) finalClasses = finalClasses.map(c => ({ ...c, isDeleted: true }));
-      if (updatedSchedules.length > 0) finalSchedules = finalSchedules.map(s => ({ ...s, isDeleted: true }));
-    }
-    
-    {
+      finalSchools = processSchools;
+      finalClasses = processClasses;
+      finalSchedules = remappedUpdatedSchedules;
+    } else {
       // Merge schools
       processSchools.forEach(sch => {
         const idx = finalSchools.findIndex(s => s.id === sch.id || s.name.toLowerCase() === sch.name.toLowerCase());
@@ -856,9 +807,9 @@ export default function App() {
     setState(nextState);
     saveStoredData(nextState);
 
-    // Sync database asynchronously
+    // Sync database asynchronously using atomic db-restore
     try {
-      await fetch('/api/sync-bulk', {
+      await fetch('/api/db-restore', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -866,7 +817,12 @@ export default function App() {
           schools: finalSchools,
           classes: finalClasses,
           schedules: finalSchedules,
-          attendance: state.attendance
+          attendance: state.attendance,
+          changes: state.changes,
+          notifications: state.notifications,
+          auditLogs: state.auditLogs,
+          users: state.users,
+          settings: state.settings
         })
       });
     } catch (err) {

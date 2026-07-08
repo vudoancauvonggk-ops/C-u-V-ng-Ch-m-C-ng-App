@@ -345,12 +345,85 @@ export default function SheetsSyncModal({
       setErrorMessage('Vui lòng chọn hoặc điền Google Spreadsheet ID/URL.');
       return;
     }
-    if (!accessToken) {
-      setErrorMessage('Mất kết nối với Google. Hãy đăng nhập lại.');
-      return;
-    }
 
     setIsLoadingData(true);
+    setErrorMessage(null);
+    setPreviewRows(null);
+    setParsedTeachers([]);
+    setParsedSchedules([]);
+    setParsedSchools([]);
+    setParsedClasses([]);
+    setIsWeeklyScheduleType(false);
+    setParsedWarnings([]);
+
+    // If we have no accessToken, attempt to parse it as a public sheet from the backend
+    if (!accessToken) {
+      try {
+        const response = await fetch('/api/parse-public-sheet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            spreadsheetId,
+            existingTeachers,
+            existingSchools
+          })
+        });
+        if (!response.ok) {
+          const errData = await response.json();
+          throw new Error(errData.error || 'Không thể đồng bộ từ backend');
+        }
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+          // Deduplicate and merge teachers by ID
+          const uniqueTeachersMap = new Map<string, Teacher>();
+          const allTeachers = data.teachers || [];
+          allTeachers.forEach((t: any) => {
+            const existing = uniqueTeachersMap.get(t.id);
+            if (existing) {
+              uniqueTeachersMap.set(t.id, {
+                ...existing,
+                dob: t.dob || existing.dob,
+                phone: t.phone || existing.phone,
+                email: t.email || existing.email,
+                address: t.address || existing.address,
+                notes: t.notes || existing.notes,
+                hourlyRate: t.hourlyRate || existing.hourlyRate,
+                monthlyAllowance: t.monthlyAllowance || existing.monthlyAllowance,
+                bonus: t.bonus || existing.bonus,
+                deduction: t.deduction || existing.deduction,
+                status: t.status === 'inactive' || existing.status === 'inactive' ? 'inactive' : 'active'
+              });
+            } else {
+              uniqueTeachersMap.set(t.id, t);
+            }
+          });
+
+          const deduplicatedTeachers = Array.from(uniqueTeachersMap.values());
+          setParsedTeachers(deduplicatedTeachers);
+          setParsedSchedules(data.schedules || []);
+          setParsedSchools(data.schools || []);
+          setParsedClasses(data.classes || []);
+          setPreviewRows(data.previewRows || []);
+          setIsWeeklyScheduleType((data.schedules || []).length > 0);
+          
+          setParsedWarnings([
+            `Đồng bộ trực tiếp qua Backend thành công! Đã quét ${data.sheetTabs?.length || 0} tab trang tính.`,
+            `Tìm thấy ${deduplicatedTeachers.length} Giáo viên độc lập và ${(data.schedules || []).length} Tiết giảng dạy xếp lịch.`,
+            ...(data.warnings || [])
+          ]);
+          setSheetTabs(data.sheetTabs || []);
+        } else {
+          throw new Error(data.message || 'Lỗi bất ngờ từ backend');
+        }
+      } catch (err: any) {
+        console.error(err);
+        setErrorMessage(err.message || 'Lỗi khi tải hoặc phân tích Google Sheet công khai qua server. Hãy chắc chắn trang tính đã được chia sẻ ở chế độ công khai "Bất kỳ ai có đường liên kết đều có thể xem".');
+      } finally {
+        setIsLoadingData(false);
+      }
+      return;
+    }
     setErrorMessage(null);
     setPreviewRows(null);
     setParsedTeachers([]);
@@ -908,197 +981,212 @@ export default function SheetsSyncModal({
 
           {syncTab === 'picker' && (
             <div className="space-y-6 text-left animate-fadeIn">
+              
+              {/* Linked Google Account Info / Sign-In Button */}
               {needsAuth ? (
-                <div className="py-10 flex flex-col items-center justify-center text-center space-y-5 border border-dashed border-slate-200 rounded-3xl bg-slate-50/50">
-                  <div className="p-5 bg-white rounded-full shadow-sm border border-slate-100 relative">
-                    <Cloud className="h-10 w-10 text-blue-500 shrink-0" />
-                    <span className="absolute bottom-0 right-0 p-1 bg-emerald-500 text-white rounded-full">
-                      <Check className="h-3 w-3" />
-                    </span>
+                <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs">
+                  <div>
+                    <h5 className="font-bold text-slate-800">Đăng nhập Google (Tùy chọn)</h5>
+                    <p className="text-[10px] text-slate-500 mt-0.5">Chỉ cần thiết nếu bảng tính của bạn đang để ở chế độ Riêng tư.</p>
                   </div>
-                  <div className="space-y-1 max-w-md">
-                    <h4 className="font-bold text-slate-800 text-sm">Kết Nối Với Google Drive Của Bạn</h4>
-                    <p className="text-xs text-slate-500 leading-relaxed px-5">
-                      Ứng dụng cần quyền đọc file Google Sheets được chỉ định trên tài khoản Google Drive của bạn để nạp thông tin danh bạ giáo viên tự động. Dữ liệu cam kết bảo mật.
-                    </p>
-                  </div>
-
-                  {/* GSI Material Styled Button */}
                   <button 
+                    type="button"
                     onClick={handleGoogleLogin}
                     disabled={isLoggingIn}
-                    className="flex items-center gap-3 px-5 py-3 border border-slate-200 shadow-sm rounded-xl text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 transition active:scale-95 disabled:opacity-50 cursor-pointer"
+                    className="flex items-center justify-center gap-2 px-4 py-2 border border-slate-200 shadow-xs rounded-xl text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 transition shrink-0 cursor-pointer"
                   >
-                    {isLoggingIn ? (
-                      <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
-                    ) : (
-                      <svg className="h-5 w-5 shrink-0" viewBox="0 0 24 24" width="24" height="24" xmlns="http://www.w3.org/2000/svg">
-                        <g transform="matrix(1, 0, 0, 1, 0, 0)">
-                          <path d="M21.35,11.1H12v2.7h5.38C17,14.71,15.82,15.75,14.4,16.5l3,2.3c1.78-1.64,2.8-4.06,2.8-6.9C20.2,11.5,20.15,11.15,21.35,11.1Z" fill="#4285F4" />
-                          <path d="M12,20.5c2.43,0,4.47-.8,6-2.2l-3-2.3a4.77,4.77,0,0,1-3,1c-2.73,0-5-1.85-5.83-4.32H3.05v2.4a8.5,8.5,0,0,0,8.95,5.42Z" fill="#34A853" />
-                          <path d="M6.17,12.68a5.1,5.1,0,0,1,0-3.36V6.92H3.05a8.5,8.5,0,0,0,0,8.16l3.12-2.4Z" fill="#FBBC05" />
-                          <path d="M12,6.38a4.62,4.62,0,0,1,3.26,1.27l2.45-2.45A8.12,8.12,0,0,0,12,2.8c-3.83,0-7.1,2.06-8.95,5.12l3.12,2.4C7,7.85,9.27,6.38,12,6.38Z" fill="#EA4335" />
-                        </g>
-                      </svg>
-                    )}
-                    <span>Kết nối trực tiếp tài khoản Google</span>
+                    {isLoggingIn ? <Loader2 className="h-4 w-4 animate-spin text-slate-400" /> : 'Đăng nhập Google'}
                   </button>
                 </div>
               ) : (
-                <div className="space-y-6 text-left">
-                  
-                  {/* Linked Google Account Info */}
-                  <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                    <div className="flex items-center gap-3">
-                      {user?.photoURL ? (
-                        <img src={user.photoURL} referrerPolicy="no-referrer" alt="" className="h-10 w-10 rounded-full border border-slate-200" />
-                      ) : (
-                        <div className="p-2.5 bg-blue-50 text-blue-600 rounded-full">
-                          <User className="h-5 w-5" />
-                        </div>
-                      )}
-                      <div className="text-left">
-                        <p className="text-xs font-bold text-slate-800">{user?.displayName || 'Tài khoản Google'}</p>
-                        <p className="text-[10px] text-slate-400 font-mono">{user?.email}</p>
-                      </div>
-                    </div>
-                    <button 
-                      onClick={handleLogout}
-                      className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-rose-50 text-rose-600 hover:text-rose-700 rounded-xl text-xs font-semibold transition cursor-pointer"
-                    >
-                      <LogOut className="h-4 w-4" /> Đăng xuất
-                    </button>
-                  </div>
-
-                  {/* FILE SELECTION CONTROLS */}
-                  <div className="bg-white border border-slate-100 rounded-2xl p-5 space-y-4 shadow-sm">
-                    <div className="flex items-center justify-between">
-                      <h4 className="font-bold text-slate-700 text-xs uppercase font-mono">1. Chọn tập tin bảng tính quản trị</h4>
-                      <button 
-                        onClick={() => setManualInput(!manualInput)}
-                        className="text-xs text-blue-600 hover:text-blue-700 font-semibold cursor-pointer"
-                      >
-                        {manualInput ? 'Chọn từ danh sách Drive' : 'Nhập URL bảng tính thủ công'}
-                      </button>
-                    </div>
-
-                    {!manualInput ? (
-                      <div className="space-y-2">
-                        <label className="text-[11px] font-bold text-slate-500 block">Danh sách Bảng tính gần nhất trên Google Drive của bạn:</label>
-                        {isLoadingFiles ? (
-                          <div className="flex items-center gap-2 text-xs text-slate-400 italic p-3 border border-slate-100 bg-slate-50/50 rounded-xl">
-                            <Loader2 className="h-4 w-4 animate-spin text-blue-500" /> Đang quét tìm các Sheets (.xlsx, .gsh)...
-                          </div>
-                        ) : spreadsheets.length === 0 ? (
-                          <div className="p-4 text-center border border-slate-100 bg-slate-50 rounded-xl text-xs text-slate-500 italic">
-                            Không tìm thấy file Google Sheets nào trên tài khoản của bạn.
-                          </div>
-                        ) : (
-                          <select 
-                            value={selectedSpreadsheetId}
-                            onChange={(e) => setSelectedSpreadsheetId(e.target.value)}
-                            className="w-full text-xs p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 font-semibold focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          >
-                            {spreadsheets.map(file => (
-                              <option key={file.id} value={file.id}>
-                                📊 {file.name} (Sửa cuối: {file.modifiedTime ? new Date(file.modifiedTime).toLocaleDateString('vi-VN') : 'chưa rõ'})
-                              </option>
-                            ))}
-                          </select>
-                        )}
-                      </div>
+                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                  <div className="flex items-center gap-3">
+                    {user?.photoURL ? (
+                      <img src={user.photoURL} referrerPolicy="no-referrer" alt="" className="h-10 w-10 rounded-full border border-slate-200" />
                     ) : (
-                      <div className="space-y-2">
-                        <label className="text-[11px] font-bold text-slate-500 block">Dán URL tài liệu Google Sheet hoặc Spreadsheet ID:</label>
-                        <input 
-                          type="text" 
-                          placeholder="VD: https://docs.google.com/spreadsheets/d/1BxiM3v0DMvOzsWd5tLu..."
-                          value={manualUrlOrId}
-                          onChange={(e) => setManualUrlOrId(e.target.value)}
-                          className="w-full text-xs p-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        />
+                      <div className="p-2.5 bg-blue-50 text-blue-600 rounded-full">
+                        <User className="h-5 w-5" />
                       </div>
                     )}
+                    <div className="text-left">
+                      <p className="text-xs font-bold text-slate-800">{user?.displayName || 'Tài khoản Google'}</p>
+                      <p className="text-[10px] text-slate-400 font-mono">{user?.email}</p>
+                    </div>
+                  </div>
+                  <button 
+                    type="button"
+                    onClick={handleLogout}
+                    className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-rose-50 text-rose-600 hover:text-rose-700 rounded-xl text-xs font-semibold transition cursor-pointer"
+                  >
+                    <LogOut className="h-4 w-4" /> Đăng xuất
+                  </button>
+                </div>
+              )}
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-                      <div className="space-y-1.5">
-                        <label className="text-[11px] font-bold text-slate-500 block">2. Phạm vi Đồng bộ (Sheet Tabs):</label>
-                        <div className="flex flex-col gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                          <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700">
-                            <input
-                              type="checkbox"
-                              checked={syncAllTabs}
-                              onChange={(e) => setSyncAllTabs(e.target.checked)}
-                              className="rounded h-4 w-4 border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+              {/* FILE SELECTION CONTROLS */}
+              <div className="bg-white border border-slate-100 rounded-2xl p-5 space-y-4 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-bold text-slate-700 text-xs uppercase font-mono">1. Chọn tập tin bảng tính quản trị</h4>
+                  {!needsAuth && (
+                    <button 
+                      type="button"
+                      onClick={() => setManualInput(!manualInput)}
+                      className="text-xs text-blue-600 hover:text-blue-700 font-semibold cursor-pointer"
+                    >
+                      {manualInput ? 'Chọn từ danh sách Drive' : 'Nhập URL bảng tính thủ công'}
+                    </button>
+                  )}
+                </div>
+
+                {(needsAuth || manualInput) ? (
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-bold text-slate-500 block">Dán URL tài liệu Google Sheet hoặc Spreadsheet ID:</label>
+                    <input 
+                      type="text" 
+                      placeholder="VD: https://docs.google.com/spreadsheets/d/1BxiM3v0DMvOzsWd5tLu..."
+                      value={manualUrlOrId}
+                      onChange={(e) => setManualUrlOrId(e.target.value)}
+                      className="w-full text-xs p-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-bold text-slate-500 block">Danh sách Bảng tính gần nhất trên Google Drive của bạn:</label>
+                    {isLoadingFiles ? (
+                      <div className="flex items-center gap-2 text-xs text-slate-400 italic p-3 border border-slate-100 bg-slate-50/50 rounded-xl">
+                        <Loader2 className="h-4 w-4 animate-spin text-blue-500" /> Đang quét tìm các Sheets (.xlsx, .gsh)...
+                      </div>
+                    ) : spreadsheets.length === 0 ? (
+                      <div className="p-4 text-center border border-slate-100 bg-slate-50 rounded-xl text-xs text-slate-500 italic">
+                        Không tìm thấy file Google Sheets nào trên tài khoản của bạn.
+                      </div>
+                    ) : (
+                      <select 
+                        value={selectedSpreadsheetId}
+                        onChange={(e) => setSelectedSpreadsheetId(e.target.value)}
+                        className="w-full text-xs p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 font-semibold focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      >
+                        {spreadsheets.map(file => (
+                          <option key={file.id} value={file.id}>
+                            📊 {file.name} (Sửa cuối: {file.modifiedTime ? new Date(file.modifiedTime).toLocaleDateString('vi-VN') : 'chưa rõ'})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-slate-500 block">2. Phạm vi Đồng bộ (Sheet Tabs):</label>
+                    <div className="flex flex-col gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700">
+                        <input 
+                          type="checkbox" 
+                          checked={syncAllTabs} 
+                          onChange={(e) => setSyncAllTabs(e.target.checked)}
+                          className="rounded text-blue-600 focus:ring-blue-500"
+                        />
+                        Đồng bộ tất cả các Tabs / Trang tính
+                      </label>
+                      
+                      {!syncAllTabs && (
+                        <div className="mt-2 space-y-1.5">
+                          <label className="text-[10px] font-bold text-slate-400 block">Chọn tên Trang tính (Tab):</label>
+                          {needsAuth ? (
+                            <input 
+                              type="text" 
+                              placeholder="Nhập tên Tab (VD: Sheet1, Lịch Dạy...)"
+                              value={selectedTab}
+                              onChange={(e) => setSelectedTab(e.target.value)}
+                              className="w-full text-xs p-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
                             />
-                            <span>Đồng bộ toàn bộ {sheetTabs.length || '...'} tabs (Cả hệ thống)</span>
-                          </label>
-                          
-                          {!syncAllTabs && (
-                            <div className="mt-2 space-y-1 animate-fadeIn">
-                              <label className="text-[10px] font-bold text-slate-400 block">Chọn trang tính cụ thể:</label>
-                              {isLoadingTabs ? (
-                                <span className="text-xs text-slate-400 italic block py-1">Đang đọc danh sách Sheet Tab...</span>
-                              ) : (
-                                <select
-                                  value={selectedTab}
-                                  onChange={(e) => setSelectedTab(e.target.value)}
-                                  className="w-full text-xs p-2 bg-white border border-slate-200 rounded-lg text-slate-700 focus:outline-none shadow-xs"
-                                >
-                                  {sheetTabs.length > 0 ? (
-                                    sheetTabs.map(tab => (
-                                      <option key={tab} value={tab}>{tab}</option>
-                                    ))
-                                  ) : (
-                                    <option value="Sheet1">Sheet1</option>
-                                  )}
-                                </select>
-                              )}
+                          ) : isLoadingTabs ? (
+                            <div className="flex items-center gap-1.5 text-[11px] text-slate-450 italic">
+                              <Loader2 className="h-3 w-3 animate-spin text-blue-500" /> Đang tải các Tabs...
                             </div>
+                          ) : (
+                            <select
+                              value={selectedTab}
+                              onChange={(e) => setSelectedTab(e.target.value)}
+                              className="w-full text-xs p-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium text-slate-650"
+                            >
+                              {sheetTabs.map(tab => (
+                                <option key={tab} value={tab}>{tab}</option>
+                              ))}
+                            </select>
                           )}
                         </div>
-                      </div>
-
-                      <div className="flex items-end justify-end">
-                        <button 
-                          onClick={handlePreviewData}
-                          disabled={isLoadingData || (!selectedSpreadsheetId && !manualUrlOrId)}
-                          className="bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs px-5 py-3 rounded-xl flex items-center gap-1.5 transition shadow-sm select-none active:scale-95 disabled:opacity-50 cursor-pointer"
-                        >
-                          {isLoadingData ? (
-                            <>
-                              <Loader2 className="h-4 w-4 animate-spin" /> Đang tải và phân tích...
-                            </>
-                          ) : (
-                            <>
-                              <RefreshCw className="h-4 w-4" /> Đọc và Xem trước dữ liệu
-                            </>
-                          )}
-                        </button>
-                      </div>
+                      )}
                     </div>
                   </div>
 
-                  {/* SHEET PARSING STRUCTURAL GUIDELINE PANEL */}
-                  {!previewRows && (
-                    <div className="bg-amber-50/50 border border-amber-100 rounded-2xl p-4 flex gap-3 text-left">
-                      <Info className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
-                      <div className="space-y-1 text-slate-700 text-xs text-left">
-                        <p className="font-bold">Mẹo Đặt Tên Cột Bảng Sheets Để Đồng Bộ Thành Công:</p>
-                        <p className="leading-relaxed text-[11px] text-slate-500">
-                          Hãy đặt tên tiêu đề ở dòng thứ 1 của Google Sheet chứa các từ khoá gần giống gồm: 
-                          <strong> Họ Tên </strong> (hoặc Họ và Tên, Tên, Name), 
-                          <strong> Điện Thoại </strong> (SĐT), 
-                          <strong> Email</strong>, 
-                          <strong> Ngày sinh </strong> (Ngày sinh, DOB), 
-                          <strong> Đơn giá </strong> (Hourly rate, Lương/tiết), và 
-                          <strong> Mã GV </strong> (Mã Số Giáo Viên).
-                        </p>
-                      </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-slate-500 block">3. Chế độ đồng bộ dữ liệu:</label>
+                    <div className="flex flex-col gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700">
+                        <input 
+                          type="radio" 
+                          name="pickerSyncMode"
+                          checked={syncMode === 'update'} 
+                          onChange={() => setSyncMode('update')}
+                          className="text-blue-600 focus:ring-blue-500"
+                        />
+                        Cập nhật & Ghép (Khuyên dùng)
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700">
+                        <input 
+                          type="radio" 
+                          name="pickerSyncMode"
+                          checked={syncMode === 'overwrite'} 
+                          onChange={() => setSyncMode('overwrite')}
+                          className="text-blue-600 focus:ring-blue-500"
+                        />
+                        Ghi đè & Thay thế toàn bộ
+                      </label>
                     </div>
-                  )}
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-3 border-t border-slate-100">
+                  <button 
+                    type="button"
+                    onClick={handlePreviewData}
+                    disabled={isLoadingData || (!selectedSpreadsheetId && !manualUrlOrId)}
+                    className="w-full sm:w-auto px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    {isLoadingData ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" /> Đang xử lý...
+                      </>
+                    ) : (
+                      <>
+                        <Eye className="h-4 w-4" /> Xem trước dữ liệu (Preview)
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* SHEET PARSING STRUCTURAL GUIDELINE PANEL */}
+              {!previewRows && (
+                <div className="bg-amber-50/50 border border-amber-100 rounded-2xl p-4 flex gap-3 text-left">
+                  <Info className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="space-y-1 text-slate-700 text-xs text-left">
+                    <p className="font-bold">Mẹo Đặt Tên Cột Bảng Sheets Để Đồng Bộ Thành Công:</p>
+                    <p className="leading-relaxed text-[11px] text-slate-500">
+                      Hãy đặt tên tiêu đề ở dòng thứ 1 của Google Sheet chứa các từ khoá gần giống gồm: 
+                      <strong> Họ Tên </strong> (hoặc Họ và Tên, Tên, Name), 
+                      <strong> Điện Thoại </strong> (SĐT), 
+                      <strong> Email</strong>, 
+                      <strong> Ngày sinh </strong> (Ngày sinh, DOB), 
+                      <strong> Đơn giá </strong> (Hourly rate, Lương/tiết), và 
+                      <strong> Mã GV </strong> (Mã Số Giáo Viên).
+                    </p>
+                  </div>
                 </div>
               )}
+
             </div>
           )}
 
