@@ -379,14 +379,31 @@ export default function TeacherDashboard({
       const attachStream = () => {
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          videoRef.current.play().catch(e => console.warn("Video play error:", e));
+          videoRef.current.play().catch(e => {
+            console.warn("Video play error:", e);
+            customAlert('Lỗi Camera', 'Trình duyệt chặn tính năng tự động phát video của camera.');
+          });
         } else {
           setTimeout(attachStream, 50);
         }
       };
       attachStream();
-    } catch (err) {
-      console.warn("Camera streaming not supported or dismissed in sandbox. Using premium animated avatar instead.", err);
+    } catch (err: any) {
+      console.error("Webcam error:", err);
+      setIsCameraActive(false);
+      
+      let errMsg = 'Không thể kết nối với Camera.';
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        errMsg = 'Quyền truy cập Camera bị chặn. Vui lòng click vào biểu tượng ổ khóa/cảnh báo ở thanh địa chỉ trình duyệt và chọn "Cho phép (Allow)" Camera.';
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        errMsg = 'Không tìm thấy thiết bị Camera (Webcam) trên máy tính/điện thoại này.';
+      } else if (err.name === 'SecurityError') {
+        errMsg = 'Trình duyệt chặn Camera do trang web bị đánh dấu "Không an toàn/Nguy hiểm".';
+      } else {
+        errMsg = `Lỗi Camera: ${err.message || err}`;
+      }
+      
+      customAlert('Lỗi Thiết Bị', errMsg);
     }
   };
 
