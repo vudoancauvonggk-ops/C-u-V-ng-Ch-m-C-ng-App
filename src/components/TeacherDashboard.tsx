@@ -373,9 +373,18 @@ export default function TeacherDashboard({
     setCapturedImage('');
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
+      
+      // React DOM might take a tick to mount the <video> element.
+      // We check recursively every 50ms until videoRef is ready.
+      const attachStream = () => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(e => console.warn("Video play error:", e));
+        } else {
+          setTimeout(attachStream, 50);
+        }
+      };
+      attachStream();
     } catch (err) {
       console.warn("Camera streaming not supported or dismissed in sandbox. Using premium animated avatar instead.", err);
     }
@@ -1325,6 +1334,7 @@ export default function TeacherDashboard({
                                 ref={videoRef} 
                                 autoPlay 
                                 playsInline 
+                                muted
                                 className="w-full h-full object-cover scale-x-[-1]"
                               />
                             ) : capturedImage ? (
