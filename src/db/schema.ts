@@ -132,7 +132,7 @@ export const users = pgTable('users', {
   username: text('username').notNull().unique(),
   password: text('password').notNull(),
   role: text('role').default('member').notNull(), // 'admin' | 'manager' | 'member'
-  teacherId: text('teacher_id').references(() => teachers.id, { onDelete: 'cascade' }),
+  teacherId: text('teacher_id').references(() => teachers.id, { onDelete: 'set null' }),
   permissions: text('permissions').default('[]').notNull(), // JSON array of custom permissions for roles
   isDeleted: boolean('is_deleted').default(false).notNull(),
   deletedAt: text('deleted_at'),
