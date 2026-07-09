@@ -167,7 +167,7 @@ async function startServer() {
     const uptimeStr = `${days}d ${hours}h ${minutes}m`;
 
     const isLocal = req.hostname === 'localhost' || req.hostname === '127.0.0.1';
-    const cloudPlatform = isLocal ? 'Local Host (Node.js)' : 'Render (Web Service)';
+    const cloudPlatform = isLocal ? 'Local Host (Node.js)' : 'CloudFly (VPS)';
     const environment = isLocal ? 'DEVELOPMENT' : 'PRODUCTION';
 
     res.json({
