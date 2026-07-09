@@ -372,6 +372,10 @@ export default function TeacherDashboard({
     setIsCameraActive(true);
     setCapturedImage('');
     try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Trình duyệt này không hỗ trợ Camera (hoặc đang mở trong ứng dụng Zalo/Facebook/Telegram). Vui lòng bấm vào biểu tượng la bàn/ba dấu chấm để "Mở bằng Safari" (iPhone) hoặc "Mở bằng Chrome" (Android) để chấm công.');
+      }
+      
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
       
       // React DOM might take a tick to mount the <video> element.
