@@ -43,7 +43,9 @@ async function startServer() {
   app.use((req, res, next) => {
     requestsToday++;
     res.on('finish', () => {
-      if (res.statusCode >= 400) {
+      // Only count server errors (5xx) as actual system health errors.
+      // Client errors (4xx) like 401 Unauthorized or 404 Not Found (e.g. from internet scanner bots) are excluded.
+      if (res.statusCode >= 500) {
         errorsToday++;
       }
     });
