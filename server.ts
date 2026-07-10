@@ -675,13 +675,9 @@ async function startServer() {
       const clsList = (await db.select().from(classes)).sort((a, b) => a.id.localeCompare(b.id));
       const skdList = (await db.select().from(schedules)).sort((a, b) => a.id.localeCompare(b.id));
       const rawAttList = (await db.select().from(attendance)).sort((a, b) => a.id.localeCompare(b.id));
-      const attList = rawAttList.map(att => {
-        const hasSelfie = att.selfieImage && att.selfieImage.length > 0;
-        return {
-          ...att,
-          selfieImage: hasSelfie ? `/api/attendance/${att.id}/selfie` : ''
-        };
-      });
+      // Return real selfieImage data to frontend so it never re-writes URL placeholders back to DB.
+      // The dedicated /api/attendance/:id/selfie endpoint handles serving images efficiently.
+      const attList = rawAttList.map(att => ({ ...att }));
       const changeList = (await db.select().from(changeRequests)).sort((a, b) => a.id.localeCompare(b.id));
       const notList = (await db.select().from(systemNotifications)).sort((a, b) => a.id.localeCompare(b.id));
       const logList = (await db.select().from(auditLogs)).sort((a, b) => a.id.localeCompare(b.id));
@@ -1276,11 +1272,7 @@ async function startServer() {
     try {
       const rawList = await db.select().from(attendance);
       const resList = rawList.map(att => {
-        const hasSelfie = att.selfieImage && att.selfieImage.length > 0;
-        return {
-          ...att,
-          selfieImage: hasSelfie ? `/api/attendance/${att.id}/selfie` : ''
-        };
+        return { ...att };
       });
       res.json(resList);
     } catch (err: any) {
@@ -1342,9 +1334,19 @@ async function startServer() {
         for (const chunk of chunks) {
           // Use serial execution for safer bulk upsert
           for (const item of chunk) {
-            await db.insert(attendance).values(item).onConflictDoUpdate({
+            // IMPORTANT: Never overwrite a real base64 selfie image with a placeholder URL string.
+            // This can happen if the frontend re-sends data it received from the GET endpoint.
+            const safeItem = { ...item };
+            if (safeItem.selfieImage && safeItem.selfieImage.startsWith('/api/attendance/')) {
+              delete safeItem.selfieImage; // Do not overwrite - keep existing DB value
+            }
+            
+            // For conflict updates, also exclude selfieImage if it's a placeholder
+            const safeSet = { ...safeItem };
+            
+            await db.insert(attendance).values(safeItem).onConflictDoUpdate({
               target: attendance.id,
-              set: item
+              set: safeSet
             });
           }
         }
