@@ -1311,6 +1311,8 @@ async function startServer() {
           res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
           return res.send(buffer);
         }
+      } else if (img.startsWith('http://') || img.startsWith('https://')) {
+        return res.redirect(img);
       }
 
       // Fallback if not a data URI
