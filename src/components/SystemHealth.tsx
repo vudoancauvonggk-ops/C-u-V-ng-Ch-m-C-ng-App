@@ -23,7 +23,8 @@ export default function SystemHealth() {
     storageTotal: 500, // MB
     requestsToday: 0,
     errorsToday: 0,
-    uptime: '0d 0h 0m'
+    uptime: '0d 0h 0m',
+    ramUsedMb: 0,
   });
 
   const hourlyData = [
@@ -106,7 +107,8 @@ export default function SystemHealth() {
           storageTotal: 500,
           requestsToday: data.requestsToday || 0,
           errorsToday: data.errorsToday || 0,
-          uptime: data.uptime || '0d 0h 0m'
+          uptime: data.uptime || '0d 0h 0m',
+          ramUsedMb: data.ramUsedMb || 0,
         });
       } else {
         setHealthData(prev => ({ ...prev, server: 'offline', db: 'offline' }));
@@ -211,6 +213,39 @@ export default function SystemHealth() {
             </p>
           </div>
         </div>
+
+        {/* RAM Usage */}
+        {metrics.ramUsedMb > 0 && (
+          <div className={`bg-white p-5 rounded-2xl border shadow-sm flex flex-col items-center justify-center text-center gap-3 ${
+            metrics.ramUsedMb > 400 ? 'border-red-200 ring-1 ring-red-300' :
+            metrics.ramUsedMb > 300 ? 'border-orange-200' : 'border-slate-100'
+          }`}>
+            <div className={`p-3 rounded-full ${
+              metrics.ramUsedMb > 400 ? 'bg-red-100' :
+              metrics.ramUsedMb > 300 ? 'bg-orange-100' : 'bg-slate-100'
+            }`}>
+              <Activity className={`h-6 w-6 ${
+                metrics.ramUsedMb > 400 ? 'text-red-600' :
+                metrics.ramUsedMb > 300 ? 'text-orange-500' : 'text-slate-500'
+              }`} />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-slate-500">RAM Máy Chủ</p>
+              <p className={`text-lg font-bold mt-1 ${
+                metrics.ramUsedMb > 400 ? 'text-red-600' :
+                metrics.ramUsedMb > 300 ? 'text-orange-500' : 'text-slate-800'
+              }`}>
+                {metrics.ramUsedMb} MB
+              </p>
+              {metrics.ramUsedMb > 400 && (
+                <p className="text-[10px] text-red-500 font-medium mt-0.5">⚠️ RAM NGUY HIỂM!</p>
+              )}
+              {metrics.ramUsedMb > 300 && metrics.ramUsedMb <= 400 && (
+                <p className="text-[10px] text-orange-500 font-medium mt-0.5">⚡ RAM đang cao</p>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">

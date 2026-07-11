@@ -172,6 +172,9 @@ async function startServer() {
     const cloudPlatform = isLocal ? 'Local Host (Node.js)' : 'CloudFly (VPS)';
     const environment = isLocal ? 'DEVELOPMENT' : 'PRODUCTION';
 
+    const memUsage = process.memoryUsage();
+    const ramUsedMb = Math.round(memUsage.rss / 1024 / 1024);
+
     res.json({
       status: 'ok',
       database: dbType,
@@ -180,7 +183,8 @@ async function startServer() {
       uptime: uptimeStr,
       dbSizeMb,
       requestsToday,
-      errorsToday
+      errorsToday,
+      ramUsedMb,
     });
   });
 
