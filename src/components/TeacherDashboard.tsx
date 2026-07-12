@@ -1840,9 +1840,8 @@ export default function TeacherDashboard({
                   {schools.filter(s => {
                     if (s.isDeleted) return false;
                     const hasRegular = activeSchedules.some(sched => sched.schoolId === s.id);
-                    const hasSub = changes.some(c => c.status === 'approved' && c.targetTeacherId === currentTeacher?.id && schedules.some(sched => sched.teacherId === c.originalTeacherId && sched.schoolId === s.id));
                     const isCreator = currentTeacher?.id ? s.id.includes(currentTeacher.id) : false;
-                    return hasRegular || hasSub || isCreator;
+                    return hasRegular || isCreator;
                   }).map(sch => {
                     return (
                       <div key={sch.id} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden group">
