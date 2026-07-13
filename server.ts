@@ -679,9 +679,15 @@ async function startServer() {
       const clsList = (await db.select().from(classes)).sort((a, b) => a.id.localeCompare(b.id));
       const skdList = (await db.select().from(schedules)).sort((a, b) => a.id.localeCompare(b.id));
       const rawAttList = (await db.select().from(attendance)).sort((a, b) => a.id.localeCompare(b.id));
-      // Return real selfieImage data to frontend so it never re-writes URL placeholders back to DB.
-      // The dedicated /api/attendance/:id/selfie endpoint handles serving images efficiently.
-      const attList = rawAttList.map(att => ({ ...att }));
+      // Optimise payload size: Replace raw base64 images with lightweight API URL placeholders.
+      // This prevents the state JSON from ballooning to 20MB+ and crashing mobile browsers.
+      const attList = rawAttList.map(att => {
+        const hasSelfie = att.selfieImage && att.selfieImage.length > 0;
+        return {
+          ...att,
+          selfieImage: hasSelfie ? `/api/attendance/${att.id}/selfie` : ''
+        };
+      });
       const changeList = (await db.select().from(changeRequests)).sort((a, b) => a.id.localeCompare(b.id));
       const notList = (await db.select().from(systemNotifications)).sort((a, b) => a.id.localeCompare(b.id));
       const logList = (await db.select().from(auditLogs)).sort((a, b) => a.id.localeCompare(b.id));
@@ -1276,7 +1282,11 @@ async function startServer() {
     try {
       const rawList = await db.select().from(attendance);
       const resList = rawList.map(att => {
-        return { ...att };
+        const hasSelfie = att.selfieImage && att.selfieImage.length > 0;
+        return {
+          ...att,
+          selfieImage: hasSelfie ? `/api/attendance/${att.id}/selfie` : ''
+        };
       });
       res.json(resList);
     } catch (err: any) {
@@ -1363,7 +1373,10 @@ async function startServer() {
 
   app.post('/api/attendance', async (req, res) => {
     try {
-      const data = req.body;
+      const data = { ...req.body };
+      if (data.selfieImage && data.selfieImage.startsWith('/api/attendance/')) {
+        delete data.selfieImage; // Prevent overwriting with placeholder URL
+      }
       await db.insert(attendance).values(data).onConflictDoUpdate({
         target: attendance.id,
         set: data
@@ -1377,7 +1390,10 @@ async function startServer() {
   app.put('/api/attendance/:id', async (req, res) => {
     try {
       const { id } = req.params;
-      const data = req.body;
+      const data = { ...req.body };
+      if (data.selfieImage && data.selfieImage.startsWith('/api/attendance/')) {
+        delete data.selfieImage; // Prevent overwriting with placeholder URL
+      }
       await db.update(attendance).set(data).where(eq(attendance.id, id));
       res.json({ id, ...data });
     } catch (err: any) {
