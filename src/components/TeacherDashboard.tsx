@@ -25,6 +25,23 @@ interface TeacherDashboardProps {
   onAddNotification: (title: string, message: string, type: 'info' | 'warning' | 'alert' | 'success', targetTeacherId?: string) => void;
 }
 
+const getSessionCategory = (sess: string) => {
+  const s = (sess || '').toLowerCase();
+  const timeMatch = s.match(/(\d{1,2})[:h](\d{2})?/);
+  let minutes = 0;
+  if (timeMatch) {
+     let hour = parseInt(timeMatch[1], 10);
+     const min = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
+     if (s.includes('chiều') && hour < 12) hour += 12;
+     minutes = hour * 60 + min;
+  } else if (s === 'morning' || s.includes('sáng')) {
+     minutes = 6 * 60;
+  } else if (s === 'afternoon' || s.includes('chiều')) {
+     minutes = 13 * 60;
+  }
+  return minutes < 12 * 60 ? 'morning' : 'afternoon';
+};
+
 export default function TeacherDashboard({
   teachers,
   schools,
@@ -731,22 +748,6 @@ export default function TeacherDashboard({
   });
 
   // Áp dụng Phụ cấp xăng xe (500k) và Phụ cấp chuyên cần (300k - mất nếu đã nghỉ/xin phép)
-  const getSessionCategory = (sess: string) => {
-    const s = (sess || '').toLowerCase();
-    const timeMatch = s.match(/(\d{1,2})[:h](\d{2})?/);
-    let minutes = 0;
-    if (timeMatch) {
-       let hour = parseInt(timeMatch[1], 10);
-       const min = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
-       if (s.includes('chiều') && hour < 12) hour += 12;
-       minutes = hour * 60 + min;
-    } else if (s === 'morning' || s.includes('sáng')) {
-       minutes = 6 * 60;
-    } else if (s === 'afternoon' || s.includes('chiều')) {
-       minutes = 13 * 60;
-    }
-    return minutes < 12 * 60 ? 'morning' : 'afternoon';
-  };
 
   const adjustPeriods = (logs: AttendanceLog[]) => {
     const groups: Record<string, AttendanceLog[]> = {};
