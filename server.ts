@@ -843,37 +843,7 @@ async function startServer() {
   });
 
 
-  app.post('/api/users/reset', async (req, res) => {
-    try {
-      await db.delete(users);
-      await db.insert(users).values([
-        {
-          id: 'u_admin',
-          username: 'admin',
-          password: 'admin',
-          role: 'admin',
-          permissions: JSON.stringify(['all'])
-        },
-        {
-          id: 'u_quanly',
-          username: 'quanly',
-          password: 'quanly',
-          role: 'manager',
-          permissions: JSON.stringify(['can_view_all_teachers', 'can_view_all_schedules'])
-        },
-        {
-          id: 'u_giao_vien',
-          username: 'giao_vien',
-          password: 'giao_vien',
-          role: 'member',
-          permissions: JSON.stringify(['can_edit_schedule', 'can_edit_school_address'])
-        }
-      ]);
-      res.json({ status: 'success' });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+
 
   app.post('/api/users/bulk', async (req, res) => {
     try {

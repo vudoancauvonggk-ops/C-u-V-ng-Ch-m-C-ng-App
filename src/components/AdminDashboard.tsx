@@ -3638,59 +3638,6 @@ export default function AdminDashboard({
               </div>
               <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
                 <button
-                  onClick={async () => {
-                    customConfirm('Xoá tất cả tài khoản', 'Bạn có chắc chắn muốn xoá toàn bộ tài khoản hiện tại và khôi phục lại các tài khoản mặc định (Admin, Quản lý, Giáo viên)?', async () => {
-                      try {
-                        const res = await fetch('/api/users/reset', { method: 'POST' });
-                        if (res.ok) {
-                          onUpdateUsers([
-                            {
-                              id: 'u_admin',
-                              username: 'admin',
-                              password: 'admin',
-                              role: 'admin',
-                              teacherId: null,
-                              permissions: ['all'],
-                              isDeleted: false
-                            },
-                            {
-                              id: 'u_quanly',
-                              username: 'quanly',
-                              password: 'quanly',
-                              role: 'manager',
-                              teacherId: null,
-                              permissions: ['can_view_all_teachers', 'can_view_all_schedules'],
-                              isDeleted: false
-                            },
-                            {
-                              id: 'u_giao_vien',
-                              username: 'giao_vien',
-                              password: 'giao_vien',
-                              role: 'member',
-                              teacherId: null,
-                              permissions: ['can_edit_schedule', 'can_edit_school_address'],
-                              isDeleted: false
-                            }
-                          ]);
-                          customAlert('Thành công', 'Đã xoá và khôi phục lại các tài khoản gốc thành công! Vui lòng chờ tải lại trang.');
-                          setTimeout(() => window.location.reload(), 1500);
-                        } else {
-                          const errText = await res.text();
-                          console.error(errText);
-                          customAlert('Lỗi', `Đã xảy ra lỗi khi xoá tài khoản: ${errText}`);
-                        }
-                      } catch (err: any) {
-                        console.error(err);
-                        customAlert('Lỗi', `Lỗi mạng: ${err.message}`);
-                      }
-                    });
-                  }}
-                  className="bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 transition cursor-pointer shadow-md shadow-rose-500/15"
-                >
-                  <RefreshCw className="h-4 w-4" />
-                  <span>XOÁ & KHÔI PHỤC GỐC</span>
-                </button>
-                <button
                   onClick={() => {
                     const newUsers = [...users];
                     let addedCount = 0;
