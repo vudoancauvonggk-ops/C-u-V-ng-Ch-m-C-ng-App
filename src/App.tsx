@@ -912,13 +912,48 @@ export default function App() {
 
   if (isInitialLoad) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
-        <div className="inline-flex p-3 bg-blue-600 rounded-2xl relative overflow-hidden font-display font-extrabold text-white text-xl shadow-lg shadow-blue-500/25 tracking-wider select-none animate-bounce mb-6">
-          ETMS
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 relative overflow-hidden font-sans">
+        {/* Background Radial Glow */}
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.08)_0%,rgba(15,23,42,0)_70%)] pointer-events-none"></div>
+        
+        {/* Large Logo Backdrop Watermark */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[320px] h-[320px] sm:w-[420px] sm:h-[420px] opacity-[0.08] blur-[2px] pointer-events-none select-none">
+          <img 
+            src="/logo_cauvong.jpg" 
+            alt="Watermark Logo" 
+            className="w-full h-full object-contain rounded-full"
+          />
         </div>
-        <p className="text-slate-400 font-mono text-xs font-bold uppercase tracking-widest animate-pulse">
-          Đang tải dữ liệu hệ thống...
-        </p>
+
+        {/* Foreground Content Card */}
+        <div className="relative z-10 flex flex-col items-center text-center max-w-md w-full space-y-6">
+          {/* Main Logo Container with Ring & Glow */}
+          <div className="relative">
+            <div className="absolute -inset-1 bg-gradient-to-r from-blue-500 via-pink-500 to-yellow-500 rounded-full blur opacity-40 animate-pulse"></div>
+            <div className="relative bg-slate-900 p-2.5 rounded-full border border-slate-800 shadow-2xl">
+              <img 
+                src="/logo_cauvong.jpg" 
+                alt="Cầu Vồng Logo" 
+                className="w-24 h-24 object-contain rounded-full"
+              />
+            </div>
+          </div>
+
+          {/* Glowing Welcome Text */}
+          <div className="space-y-2">
+            <h2 className="text-xl md:text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-100 to-slate-300 tracking-tight leading-tight select-none">
+              Chào Mừng Bạn Đến Với Cầu Vồng
+            </h2>
+            <p className="text-slate-400 text-[10px] font-bold tracking-widest uppercase animate-pulse">
+              Đang tải dữ liệu...
+            </p>
+          </div>
+
+          {/* Minimalist Premium Progress Bar Indicator */}
+          <div className="w-40 h-1 bg-slate-800 rounded-full overflow-hidden relative">
+            <div className="absolute top-0 bottom-0 left-0 bg-gradient-to-r from-blue-500 via-pink-500 to-yellow-500 w-1/2 rounded-full animate-progress-loading"></div>
+          </div>
+        </div>
       </div>
     );
   }
