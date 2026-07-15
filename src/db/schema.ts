@@ -137,3 +137,12 @@ export const users = pgTable('users', {
   isDeleted: boolean('is_deleted').default(false).notNull(),
   deletedAt: text('deleted_at'),
 });
+
+export const pushSubscriptions = pgTable('push_subscriptions', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  endpoint: text('endpoint').notNull().unique(),
+  keysAuth: text('keys_auth').notNull(),
+  keysP256dh: text('keys_p256dh').notNull(),
+  createdAt: text('created_at').notNull(),
+});

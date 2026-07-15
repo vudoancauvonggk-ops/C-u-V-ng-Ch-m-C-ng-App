@@ -1735,12 +1735,12 @@ export default function AdminDashboard({
       // We no longer permanently modify the recurring weekly schedule for temporary shift changes.
       // The TeacherDashboard dynamically resolves substitute assignments using the `changes` array.
       
-      // Notify substitute teacher if applicable
       if (req.targetTeacherId) {
          onAddNotification(
            'Phân công dạy dùm mới 📣', 
            `Bạn được Admin phân công dạy thay vào ngày ${req.date}, ca ${req.session === 'morning' ? 'Sáng' : 'Chiều'}. Vui lòng kiểm tra tab Dạy Dùm để xem chi tiết trường, lớp và đường đi.`, 
-           'info'
+           'info',
+           req.targetTeacherId
          );
       }
 

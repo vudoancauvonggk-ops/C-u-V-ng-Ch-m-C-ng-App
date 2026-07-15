@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import webPush from 'web-push';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
@@ -17,7 +18,8 @@ import {
   auditLogs,
   users,
   appSettings,
-  meetingAttendance
+  meetingAttendance,
+  pushSubscriptions
 } from './src/db/schema.ts';
 import { eq, not, ne, isNotNull, sql } from 'drizzle-orm';
 import { 
@@ -40,6 +42,48 @@ async function startServer() {
   let requestsToday = 0;
   let latestQuickAnnouncement: { id: string; title: string; message: string; timestamp: string } | null = null;
   let errorsToday = 0;
+
+  // Configure Web Push VAPID keys
+  const publicKey = process.env.VAPID_PUBLIC_KEY || 'BP4ox6NYl1dug9LnF3Y2kjl23EE_ruRp3W03du42IFoIjSJa_x8SsFf8r7jb2ReVgkSWqKKkP9IRc3mGYqK4f5c';
+  const privateKey = process.env.VAPID_PRIVATE_KEY || 'KivFJXq6L2QQp2JpTNv06pSWZC7XpIYOD348VTkQXLc';
+  webPush.setVapidDetails(
+    'mailto:admin@cauvong.edu.vn',
+    publicKey,
+    privateKey
+  );
+
+  const sendPushNotification = async (targetUserId: string | null, payload: { title: string; message: string }) => {
+    try {
+      let subs;
+      if (targetUserId) {
+        subs = await db.select().from(pushSubscriptions).where(eq(pushSubscriptions.userId, targetUserId));
+      } else {
+        subs = await db.select().from(pushSubscriptions);
+      }
+      
+      const payloadStr = JSON.stringify(payload);
+      
+      const promises = subs.map(sub => {
+        const pushSubscription = {
+          endpoint: sub.endpoint,
+          keys: {
+            auth: sub.keysAuth,
+            p256dh: sub.keysP256dh
+          }
+        };
+        return webPush.sendNotification(pushSubscription, payloadStr).catch(async (err) => {
+          console.warn('Failed to send push notification, status:', err.statusCode);
+          if (err.statusCode === 404 || err.statusCode === 410) {
+            await db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, sub.id));
+          }
+        });
+      });
+      
+      await Promise.all(promises);
+    } catch (e) {
+      console.error('Error sending push notifications:', e);
+    }
+  };
 
   app.use((req, res, next) => {
     requestsToday++;
@@ -749,8 +793,50 @@ async function startServer() {
         message: message || '',
         timestamp: new Date().toISOString()
       };
+      
+      // Send Web Push notification to all subscribers
+      sendPushNotification(null, {
+        title: title || 'Thông báo từ Ban Giám Đốc',
+        message: message || ''
+      });
+
       res.json({ success: true, announcement: latestQuickAnnouncement });
     } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/notifications/subscribe', async (req, res) => {
+    try {
+      const { userId, subscription } = req.body;
+      if (!userId || !subscription || !subscription.endpoint) {
+        res.status(400).json({ error: 'Missing subscription details' });
+        return;
+      }
+      
+      const endpoint = subscription.endpoint;
+      const keysAuth = subscription.keys?.auth || '';
+      const keysP256dh = subscription.keys?.p256dh || '';
+      
+      const existing = await db.select().from(pushSubscriptions).where(eq(pushSubscriptions.endpoint, endpoint)).limit(1);
+      if (existing.length > 0) {
+        await db.update(pushSubscriptions)
+          .set({ userId, keysAuth, keysP256dh })
+          .where(eq(pushSubscriptions.endpoint, endpoint));
+      } else {
+        await db.insert(pushSubscriptions).values({
+          id: `SUB_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+          userId,
+          endpoint,
+          keysAuth,
+          keysP256dh,
+          createdAt: new Date().toISOString()
+        });
+      }
+      
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error('Error saving subscription:', err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -1547,6 +1633,13 @@ async function startServer() {
         target: systemNotifications.id,
         set: data
       });
+      
+      // Trigger Web Push notification to device
+      sendPushNotification(data.targetTeacherId || null, {
+        title: data.title || 'Thông báo mới',
+        message: data.message || ''
+      });
+
       res.status(201).json(data);
     } catch (err: any) {
       res.status(500).json({ error: err.message });

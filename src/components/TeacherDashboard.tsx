@@ -43,6 +43,19 @@ const getSessionCategory = (sess: string) => {
   return minutes < 12 * 60 ? 'morning' : 'afternoon';
 };
 
+const urlBase64ToUint8Array = (base64String: string) => {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding)
+    .replace(/\-/g, '+')
+    .replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+};
+
 export default function TeacherDashboard({
   teachers,
   schools,
@@ -240,6 +253,36 @@ export default function TeacherDashboard({
   const [editingScheduleItem, setEditingScheduleItem] = useState<Schedule | null>(null);
 
   // Custom Background Image
+  // Auto-subscribe to Web Push if permission is already granted
+  useEffect(() => {
+    const autoRegisterPush = async () => {
+      if ('Notification' in window && Notification.permission === 'granted' && 'serviceWorker' in navigator && currentTeacher) {
+        try {
+          const reg = await navigator.serviceWorker.ready;
+          const subscribeOptions = {
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array('BP4ox6NYl1dug9LnF3Y2kjl23EE_ruRp3W03du42IFoIjSJa_x8SsFf8r7jb2ReVgkSWqKKkP9IRc3mGYqK4f5c')
+          };
+          let subscription = await reg.pushManager.getSubscription();
+          if (!subscription) {
+            subscription = await reg.pushManager.subscribe(subscribeOptions);
+          }
+          await fetch('/api/notifications/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: currentTeacher.id,
+              subscription
+            })
+          });
+        } catch (e) {
+          console.warn('Auto-registering push subscription failed:', e);
+        }
+      }
+    };
+    autoRegisterPush();
+  }, [currentTeacher]);
+
   // Morning Greeting Notification
   useEffect(() => {
     if (!currentTeacher) return;
@@ -481,15 +524,48 @@ export default function TeacherDashboard({
       customAlert('Thông báo', 'Trình duyệt của bạn không hỗ trợ thông báo (Push Notifications).');
       return;
     }
-    const permission = await Notification.requestPermission();
-    if (permission === 'granted') {
-      customAlert('Thông báo', 'Đã bật thông báo! Hệ thống sẽ nhắc nhở bạn khi ứng dụng đang mở.');
-      new Notification('Đã bật thông báo', {
-        body: 'Bạn sẽ nhận được nhắc nhở điểm danh trước mỗi ca dạy.',
-        icon: '/favicon.ico'
-      });
-    } else {
-      customAlert('Thông báo', 'Bạn đã từ chối quyền gửi thông báo.');
+    
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission === 'granted') {
+        if ('serviceWorker' in navigator) {
+          const reg = await navigator.serviceWorker.ready;
+          const subscribeOptions = {
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array('BP4ox6NYl1dug9LnF3Y2kjl23EE_ruRp3W03du42IFoIjSJa_x8SsFf8r7jb2ReVgkSWqKKkP9IRc3mGYqK4f5c')
+          };
+          
+          let subscription = await reg.pushManager.getSubscription();
+          if (!subscription) {
+            subscription = await reg.pushManager.subscribe(subscribeOptions);
+          }
+          
+          const response = await fetch('/api/notifications/subscribe', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              userId: currentTeacher?.id || currentUser?.username || 'unknown',
+              subscription
+            })
+          });
+          
+          if (response.ok) {
+            customAlert('Thông báo', 'Hệ thống thông báo đẩy trên điện thoại đã được kích hoạt thành công!');
+          } else {
+            console.error('Failed to save push subscription on server');
+            customAlert('Thông báo', 'Đã bật thông báo, nhưng lỗi đồng bộ với máy chủ.');
+          }
+        } else {
+          customAlert('Thông báo', 'Trình duyệt không hỗ trợ Service Worker để nhận tin nhắn chạy ngầm.');
+        }
+      } else {
+        customAlert('Thông báo', 'Bạn đã từ chối quyền gửi thông báo.');
+      }
+    } catch (err: any) {
+      console.error('Error enabling push notifications:', err);
+      customAlert('Lỗi', `Không thể thiết lập thông báo đẩy: ${err.message}`);
     }
   };
 
