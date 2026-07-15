@@ -38,6 +38,7 @@ async function startServer() {
   app.use(express.json({ limit: '200mb' }));
 
   let requestsToday = 0;
+  let latestQuickAnnouncement: { id: string; title: string; message: string; timestamp: string } | null = null;
   let errorsToday = 0;
 
   app.use((req, res, next) => {
@@ -731,10 +732,26 @@ async function startServer() {
         auditLogs: logList,
         users: userList,
         meetingAttendance: maList,
-        settings: systemSettings[0]
+        settings: systemSettings[0],
+        quickAnnouncement: latestQuickAnnouncement
       });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to retrieve system state', details: err.message });
+    }
+  });
+
+  app.post('/api/notifications/quick-broadcast', (req, res) => {
+    try {
+      const { title, message } = req.body;
+      latestQuickAnnouncement = {
+        id: `QA_${Date.now()}`,
+        title: title || 'Thông báo từ Ban Giám Đốc',
+        message: message || '',
+        timestamp: new Date().toISOString()
+      };
+      res.json({ success: true, announcement: latestQuickAnnouncement });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 

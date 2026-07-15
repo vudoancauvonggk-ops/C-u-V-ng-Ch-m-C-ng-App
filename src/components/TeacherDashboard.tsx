@@ -23,6 +23,7 @@ interface TeacherDashboardProps {
   onUpdateChanges: (changes: ChangeRequest[]) => Promise<void> | void;
   onAddAuditLog: (action: string, actor: string, details: string) => void;
   onAddNotification: (title: string, message: string, type: 'info' | 'warning' | 'alert' | 'success', targetTeacherId?: string) => void;
+  quickAnnouncement?: { id: string; title: string; message: string; timestamp: string } | null;
 }
 
 const getSessionCategory = (sess: string) => {
@@ -57,10 +58,12 @@ export default function TeacherDashboard({
   onUpdateAttendance,
   onUpdateChanges,
   onAddAuditLog,
-  onAddNotification
+  onAddNotification,
+  quickAnnouncement
 }: TeacherDashboardProps) {
   // Current active teacher simulator state
   const [selectedTeacherId, setSelectedTeacherId] = useState<string>('');
+  const [lastReadQaId, setLastReadQaId] = useState(() => localStorage.getItem('read_qa_id') || '');
   
   const rawPerms = typeof currentUser?.permissions === 'string' 
     ? (() => { try { return JSON.parse(currentUser.permissions || '[]'); } catch { return []; } })() 
@@ -2304,6 +2307,44 @@ export default function TeacherDashboard({
                     onClick={() => setAlertModal(null)}
                   >
                     Đã hiểu
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Quick Broadcast Announcement Modal Overlay */}
+          {quickAnnouncement && quickAnnouncement.id !== lastReadQaId && (
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+              <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl border border-blue-50/50 animate-scaleIn relative">
+                <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-blue-500 via-pink-500 to-yellow-500"></div>
+                <div className="p-6 space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-blue-50 rounded-xl text-blue-600">
+                      <Bell className="w-6 h-6 animate-pulse" />
+                    </div>
+                    <div>
+                      <h3 className="font-extrabold text-slate-900 text-base leading-tight">
+                        {quickAnnouncement.title}
+                      </h3>
+                      <span className="text-[9px] font-mono text-slate-400">
+                        {new Date(quickAnnouncement.timestamp).toLocaleString('vi-VN')}
+                      </span>
+                    </div>
+                  </div>
+                  <p className="text-xs text-slate-700 leading-relaxed bg-slate-50 p-4 rounded-2xl border border-slate-100 whitespace-pre-wrap font-medium">
+                    {quickAnnouncement.message}
+                  </p>
+                </div>
+                <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+                  <button 
+                    className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-2xl text-xs shadow-md shadow-blue-500/10 transition active:scale-98"
+                    onClick={() => {
+                      localStorage.setItem('read_qa_id', quickAnnouncement.id);
+                      setLastReadQaId(quickAnnouncement.id);
+                    }}
+                  >
+                    ĐÃ HIỂU & ĐÓNG
                   </button>
                 </div>
               </div>

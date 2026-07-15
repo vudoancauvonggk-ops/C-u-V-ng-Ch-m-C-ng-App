@@ -58,6 +58,7 @@ export default function App() {
       users: AppUser[];
       meetingAttendance: MeetingAttendance[];
       settings: AppSettings;
+      quickAnnouncement?: { id: string; title: string; message: string; timestamp: string } | null;
   }>(() => ({
     teachers: [],
     schools: [],
@@ -69,7 +70,8 @@ export default function App() {
     auditLogs: [],
     users: [],
     meetingAttendance: [],
-    settings: { id: 'global', allowTeacherScheduleEdit: false }
+    settings: { id: 'global', allowTeacherScheduleEdit: false },
+    quickAnnouncement: null
   }));
   
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
@@ -212,6 +214,26 @@ export default function App() {
                 }
                 return { ...u, permissions: parsed };
               });
+            }
+            
+            if (dbState && dbState.quickAnnouncement) {
+              const qa = dbState.quickAnnouncement;
+              const lastNotifiedQaId = localStorage.getItem('last_notified_qa_id');
+              const readQaId = localStorage.getItem('read_qa_id');
+              
+              if (lastNotifiedQaId !== qa.id && readQaId !== qa.id) {
+                if ('Notification' in window && Notification.permission === 'granted') {
+                  try {
+                    new Notification(qa.title, {
+                      body: qa.message,
+                      icon: '/logo_cauvong.jpg'
+                    });
+                    localStorage.setItem('last_notified_qa_id', qa.id);
+                  } catch (e) {
+                    console.warn('Failed to trigger native notification:', e);
+                  }
+                }
+              }
             }
             
             setState(dbState);
@@ -1240,6 +1262,7 @@ export default function App() {
               onUpdateChanges={handleUpdateChanges}
               onAddAuditLog={handleAddAuditLog}
               onAddNotification={handleAddNotification}
+              quickAnnouncement={state.quickAnnouncement}
             />
           </div>
         )}
