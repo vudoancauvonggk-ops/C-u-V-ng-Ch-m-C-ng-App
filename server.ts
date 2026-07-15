@@ -19,7 +19,8 @@ import {
   users,
   appSettings,
   meetingAttendance,
-  pushSubscriptions
+  pushSubscriptions,
+  schoolCancellations
 } from './src/db/schema.ts';
 import { eq, not, ne, isNotNull, sql } from 'drizzle-orm';
 import { 
@@ -766,6 +767,7 @@ async function startServer() {
         userList.push(adminUser as any);
       }
       const maList = (await db.select().from(meetingAttendance)).sort((a, b) => a.id.localeCompare(b.id));
+      const cancellationsList = await db.select().from(schoolCancellations);
       
       let systemSettings = await db.select().from(appSettings).limit(1);
       if (systemSettings.length === 0) {
@@ -787,7 +789,8 @@ async function startServer() {
         users: userList,
         meetingAttendance: maList,
         settings: systemSettings[0],
-        quickAnnouncement: latestQuickAnnouncement
+        quickAnnouncement: latestQuickAnnouncement,
+        schoolCancellations: cancellationsList
       });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to retrieve system state', details: err.message });
@@ -847,6 +850,46 @@ async function startServer() {
       res.json({ success: true });
     } catch (err: any) {
       console.error('Error saving subscription:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/school-cancellations', async (req, res) => {
+    try {
+      const data = req.body;
+      const id = `CAN_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+      const payload = {
+        id,
+        ...data,
+        createdAt: new Date().toISOString()
+      };
+      await db.insert(schoolCancellations).values(payload);
+      res.status(201).json(payload);
+    } catch (err: any) {
+      console.error('Error creating school cancellation:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put('/api/school-cancellations/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const data = req.body;
+      await db.update(schoolCancellations).set(data).where(eq(schoolCancellations.id, id));
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error('Error updating school cancellation:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/school-cancellations/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      await db.delete(schoolCancellations).where(eq(schoolCancellations.id, id));
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error('Error deleting school cancellation:', err);
       res.status(500).json({ error: err.message });
     }
   });

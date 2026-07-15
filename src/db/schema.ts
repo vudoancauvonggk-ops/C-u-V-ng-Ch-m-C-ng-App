@@ -146,3 +146,17 @@ export const pushSubscriptions = pgTable('push_subscriptions', {
   keysP256dh: text('keys_p256dh').notNull(),
   createdAt: text('created_at').notNull(),
 });
+
+export const schoolCancellations = pgTable('school_cancellations', {
+  id: text('id').primaryKey(),
+  date: text('date').notNull(),
+  scheduleId: text('schedule_id').references(() => schedules.id, { onDelete: 'set null' }),
+  teacherId: text('teacher_id').references(() => teachers.id, { onDelete: 'cascade' }).notNull(),
+  schoolId: text('school_id').references(() => schools.id, { onDelete: 'cascade' }).notNull(),
+  classId: text('class_id').references(() => classes.id, { onDelete: 'cascade' }).notNull(),
+  session: text('session').notNull(),
+  cancellationType: text('cancellation_type').notNull(), // 'arrived' | 'notified'
+  periodsCredited: integer('periods_credited').default(0).notNull(),
+  reason: text('reason').default('').notNull(),
+  createdAt: text('created_at').notNull(),
+});

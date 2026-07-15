@@ -59,6 +59,7 @@ export default function App() {
       meetingAttendance: MeetingAttendance[];
       settings: AppSettings;
       quickAnnouncement?: { id: string; title: string; message: string; timestamp: string } | null;
+      schoolCancellations: any[];
   }>(() => ({
     teachers: [],
     schools: [],
@@ -71,7 +72,8 @@ export default function App() {
     users: [],
     meetingAttendance: [],
     settings: { id: 'global', allowTeacherScheduleEdit: false },
-    quickAnnouncement: null
+    quickAnnouncement: null,
+    schoolCancellations: []
   }));
   
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
@@ -905,6 +907,14 @@ export default function App() {
     }
   };
 
+  const handleUpdateSchoolCancellations = (updated: any[]) => {
+    setState(prev => {
+      const nextState = { ...prev, schoolCancellations: updated };
+      saveStoredData(nextState);
+      return nextState;
+    });
+  };
+
   // Send Push warnings / Alerts
   const handleAddNotification = async (
     title: string, 
@@ -1239,6 +1249,8 @@ export default function App() {
               onAddAuditLog={handleAddAuditLog}
               onAddNotification={handleAddNotification}
               onBulkSync={handleBulkSync}
+              schoolCancellations={state.schoolCancellations}
+              onUpdateSchoolCancellations={handleUpdateSchoolCancellations}
             />
           </div>
         )}
@@ -1263,6 +1275,8 @@ export default function App() {
               onAddAuditLog={handleAddAuditLog}
               onAddNotification={handleAddNotification}
               quickAnnouncement={state.quickAnnouncement}
+              schoolCancellations={state.schoolCancellations}
+              onUpdateSchoolCancellations={handleUpdateSchoolCancellations}
             />
           </div>
         )}

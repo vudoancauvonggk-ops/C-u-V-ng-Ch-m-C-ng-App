@@ -50,6 +50,8 @@ interface AdminDashboardProps {
   onAddNotification: (title: string, message: string, type: 'info' | 'warning' | 'alert' | 'success', targetTeacherId?: string) => void;
   onBulkSync?: (teachers: Teacher[], schools: School[], classes: ClassInfo[], schedules: Schedule[], mode: 'overwrite' | 'update') => Promise<void>;
   onSyncState?: (state: any) => void;
+  schoolCancellations: any[];
+  onUpdateSchoolCancellations: (updated: any[]) => void;
 }
 
 
@@ -308,7 +310,9 @@ export default function AdminDashboard({
   onUpdateSettings,
   onAddAuditLog,
   onAddNotification,
-  onBulkSync
+  onBulkSync,
+  schoolCancellations,
+  onUpdateSchoolCancellations
 }: AdminDashboardProps) {
   const hasPermission = (perm: string) => {
     if (currentUser?.role === 'admin') return true;
@@ -1812,8 +1816,9 @@ export default function AdminDashboard({
         try { if (t.bonusPeriodsJSON) bonusPeriodsDict = JSON.parse(t.bonusPeriodsJSON); } catch(e) {}
         const currentBonusPeriods = bonusPeriodsDict[reportMonth] || 0;
         
-        const totalPeriods = regularPeriods + substitutePeriods + currentBonusPeriods;
-        const baseLessonsSalary = (regularPeriods + currentBonusPeriods) * t.hourlyRate + substitutePeriods * 55000;
+        const schoolClosedArrivedPeriods = schoolCancellations.filter(c => c.teacherId === t.id && c.date.startsWith(reportMonth) && c.cancellationType === 'arrived').length;
+        const totalPeriods = regularPeriods + substitutePeriods + currentBonusPeriods + schoolClosedArrivedPeriods;
+        const baseLessonsSalary = (regularPeriods + currentBonusPeriods + schoolClosedArrivedPeriods) * t.hourlyRate + substitutePeriods * 55000;
         const hasApprovedLeave = changes.some(c => c.teacherId === t.id && c.status === 'approved' && c.date.startsWith(reportMonth) && (c.requestType === 'sick_leave' || c.requestType === 'substitute_teacher'));
         const artEvents = changes.filter(c => c.teacherId === t.id && c.status === 'approved' && c.date.startsWith(reportMonth) && c.requestType === 'art_performance');
         let artPerformanceBonus = 0;
@@ -1944,6 +1949,7 @@ export default function AdminDashboard({
           (currentUser?.role === 'admin' || hasPermission('can_approve_attendance') || !!currentUser?.teacherId) ? { id: 'attendance', label: 'Duyệt Chấm Công', icon: Clock, count: flaggedCount } : null,
           (currentUser?.role === 'admin' || hasPermission('can_manage_meeting_attendance') || !!currentUser?.teacherId) ? { id: 'meeting_attendance', label: 'Họp & Chuyên Môn', icon: CheckCircle2 } : null,
           (currentUser?.role === 'admin' || hasPermission('can_approve_changes') || !!currentUser?.teacherId) ? { id: 'changes', label: 'Thay Ca & Phép', icon: ArrowLeftRight, count: pendingChanges } : null,
+          currentUser?.role === 'admin' ? { id: 'school_cancellations', label: 'Trường Nghỉ', icon: AlertTriangle } : null,
           (currentUser?.role === 'admin' || hasPermission('can_view_reports') || !!currentUser?.teacherId) ? { id: 'reports', label: 'Bảng Lương & Chi Phí', icon: DollarSign } : null,
           (currentUser?.role === 'admin' || hasPermission('can_view_audit_logs')) ? { id: 'logs', label: 'Nhật Ký Audit', icon: FileText } : null,
           currentUser?.role === 'admin' ? { id: 'accounts', label: 'Cấp Quyền / Tài Khoản', icon: ShieldCheck } : null,
@@ -3471,6 +3477,178 @@ export default function AdminDashboard({
           </div>
         )}
 
+        {/* ----------------TAB: SCHOOL CLOSURES (TRƯỜNG NGHỈ) ---------------- */}
+        {activeTab === 'school_cancellations' && (
+          <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6 animate-fadeIn" id="school_cancellations_tab">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+              <div>
+                <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-rose-500" /> Báo Cáo Trường Nghỉ Trong Tháng
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Quản lý các ca dạy bị huỷ do trường báo nghỉ. Hỗ trợ đối chiếu và thu tiền học phí từ phía nhà trường chính xác.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-slate-500 font-medium">Chọn tháng đối chiếu:</span>
+                <input 
+                  type="month" 
+                  value={reportMonth} 
+                  onChange={(e) => setReportMonth(e.target.value)}
+                  className="border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800 font-bold focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            {/* Calculations & Summary Cards */}
+            {(() => {
+              const monthClosedList = schoolCancellations.filter(c => c.date.startsWith(reportMonth));
+              const arrivedCount = monthClosedList.filter(c => c.cancellationType === 'arrived').length;
+              const notifiedCount = monthClosedList.filter(c => c.cancellationType === 'notified').length;
+              const totalCredited = monthClosedList.reduce((acc, curr) => acc + curr.periodsCredited, 0);
+
+              return (
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                  <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl">
+                    <span className="text-[10px] text-slate-400 font-bold uppercase block">TỔNG CA TRƯỜNG NGHỈ</span>
+                    <strong className="text-xl text-slate-800 font-mono block mt-1">{monthClosedList.length} ca</strong>
+                  </div>
+                  <div className="p-4 bg-orange-50/50 border border-orange-100 rounded-2xl">
+                    <span className="text-[10px] text-orange-600/80 font-bold uppercase block">ĐÃ TỚI TRƯỜNG MỚI BÁO</span>
+                    <strong className="text-xl text-orange-700 font-mono block mt-1">{arrivedCount} ca (+1t)</strong>
+                  </div>
+                  <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl">
+                    <span className="text-[10px] text-slate-400 font-bold uppercase block">ĐƯỢC BÁO NGHỈ TRƯỚC</span>
+                    <strong className="text-xl text-slate-600 font-mono block mt-1">{notifiedCount} ca (0t)</strong>
+                  </div>
+                  <div className="p-4 bg-emerald-50/50 border border-emerald-100 rounded-2xl">
+                    <span className="text-[10px] text-emerald-600/80 font-bold uppercase block">TỔNG TIẾT DẠY CỘNG DỒN</span>
+                    <strong className="text-xl text-emerald-700 font-mono block mt-1">{totalCredited} tiết</strong>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Closure Logs Table */}
+            <div className="overflow-x-auto border border-slate-100 rounded-2xl">
+              <table className="w-full text-xs text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-100 text-[10px] text-slate-400 uppercase font-mono">
+                    <th className="p-3">Ngày</th>
+                    <th className="p-3">Giáo Viên</th>
+                    <th className="p-3">Trường & Lớp</th>
+                    <th className="p-3">Ca dạy</th>
+                    <th className="p-3">Phương án báo nghỉ</th>
+                    <th className="p-3 text-center">Tiết cộng</th>
+                    <th className="p-3">Lý do nghỉ / Ghi chú (Admin bổ sung)</th>
+                    <th className="p-3 text-center">Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {(() => {
+                    const monthClosedList = schoolCancellations.filter(c => c.date.startsWith(reportMonth));
+                    if (monthClosedList.length === 0) {
+                      return (
+                        <tr>
+                          <td colSpan={8} className="p-8 text-center text-slate-400 font-medium bg-slate-50/20">
+                            Không có báo cáo trường nghỉ nào ghi nhận trong tháng này.
+                          </td>
+                        </tr>
+                      );
+                    }
+                    return monthClosedList.map(c => {
+                      const teacher = rawTeachers.find(t => t.id === c.teacherId);
+                      const school = rawSchools.find(s => s.id === c.schoolId);
+                      const classObj = rawClasses.find(cl => cl.id === c.classId);
+                      
+                      return (
+                        <tr key={c.id} className="hover:bg-slate-50/50 transition animate-fadeIn">
+                          <td className="p-3 font-mono font-bold text-slate-700">{c.date}</td>
+                          <td className="p-3 font-semibold text-slate-900">{teacher ? teacher.name : c.teacherId}</td>
+                          <td className="p-3 text-slate-600 font-medium">
+                            {school ? school.name : c.schoolId} - <strong>{classObj ? classObj.name : c.classId}</strong>
+                          </td>
+                          <td className="p-3">
+                            <span className={`text-[10px] px-2 py-0.5 rounded font-mono font-bold ${
+                              c.session === 'morning' ? 'bg-amber-50 text-amber-700 border border-amber-100' : 'bg-indigo-50 text-indigo-700 border border-indigo-100'
+                            }`}>
+                              {c.session === 'morning' ? 'SÁNG' : 'CHIỀU'}
+                            </span>
+                          </td>
+                          <td className="p-3">
+                            <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${
+                              c.cancellationType === 'arrived' 
+                                ? 'bg-orange-50 text-orange-700 border border-orange-100' 
+                                : 'bg-slate-100 text-slate-600 border border-slate-200'
+                            }`}>
+                              {c.cancellationType === 'arrived' ? 'Tới trường mới báo' : 'Báo trước khi tới'}
+                            </span>
+                          </td>
+                          <td className="p-3 text-center font-mono font-bold text-slate-800">+{c.periodsCredited}t</td>
+                          <td className="p-3">
+                            <input 
+                              type="text"
+                              value={c.reason}
+                              placeholder="Nhấp để nhập lý do nghỉ..."
+                              onChange={async (e) => {
+                                const newReason = e.target.value;
+                                const updatedList = schoolCancellations.map(item => 
+                                  item.id === c.id ? { ...item, reason: newReason } : item
+                                );
+                                onUpdateSchoolCancellations(updatedList);
+                                
+                                // Silent save to server on change
+                                try {
+                                  await fetch(`/api/school-cancellations/${c.id}`, {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ reason: newReason })
+                                  });
+                                } catch (err) {
+                                  console.error('Failed to update closure reason:', err);
+                                }
+                              }}
+                              className="w-full bg-slate-50 hover:bg-slate-100 focus:bg-white border border-slate-200 focus:border-blue-400 rounded-lg px-2.5 py-1 text-slate-800 focus:outline-none transition"
+                            />
+                          </td>
+                          <td className="p-3 text-center">
+                            <button 
+                              onClick={async () => {
+                                if (confirm('Bạn có chắc chắn muốn xóa bản ghi báo nghỉ này không?')) {
+                                  try {
+                                    const res = await fetch(`/api/school-cancellations/${c.id}`, {
+                                      method: 'DELETE'
+                                    });
+                                    if (res.ok) {
+                                      const updatedList = schoolCancellations.filter(item => item.id !== c.id);
+                                      onUpdateSchoolCancellations(updatedList);
+                                      onAddAuditLog(
+                                        'Xóa báo trường nghỉ',
+                                        'Admin',
+                                        `Xóa bản ghi báo trường nghỉ ca ${c.session === 'morning' ? 'Sáng' : 'Chiều'} ngày ${c.date} của ${teacher ? teacher.name : c.teacherId}`
+                                      );
+                                    }
+                                  } catch (err) {
+                                    console.error(err);
+                                  }
+                                }
+                              }}
+                              className="text-rose-600 hover:text-rose-800 p-1.5 rounded-lg hover:bg-rose-50 transition"
+                            >
+                              <Trash2 className="w-4.5 h-4.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })()}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         {/* ----------------TAB 7: PAYROLL & REPORTING & FILE EXPORTS ---------------- */}
         {activeTab === 'reports' && (
           <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6 animate-fadeIn" id="reports_tab">
@@ -3589,9 +3767,9 @@ export default function AdminDashboard({
                           } catch(e) {}
                           const currentBonusPeriods = bonusPeriodsDict[reportMonth] || 0;
                           
-                          const totalPeriods = regularPeriods + substitutePeriods + currentBonusPeriods;
-                          
-                          const baseLessonsSalary = (regularPeriods + currentBonusPeriods) * teacher.hourlyRate + substitutePeriods * 55000;
+                          const schoolClosedArrivedPeriods = schoolCancellations.filter(c => c.teacherId === teacher.id && c.date.startsWith(reportMonth) && c.cancellationType === 'arrived').length;
+                          const totalPeriods = regularPeriods + substitutePeriods + currentBonusPeriods + schoolClosedArrivedPeriods;
+                          const baseLessonsSalary = (regularPeriods + currentBonusPeriods + schoolClosedArrivedPeriods) * teacher.hourlyRate + substitutePeriods * 55000;
                           
                           // Giữ lại logic phụ cấp 500k cứng + chuyên cần 300k
                           const hasApprovedLeave = changes.some((c: any) => c.teacherId === teacher.id && c.status === 'approved' && c.date.startsWith(reportMonth) && (c.requestType === 'sick_leave' || c.requestType === 'substitute_teacher'));

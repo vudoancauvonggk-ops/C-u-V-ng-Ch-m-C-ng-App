@@ -24,6 +24,8 @@ interface TeacherDashboardProps {
   onAddAuditLog: (action: string, actor: string, details: string) => void;
   onAddNotification: (title: string, message: string, type: 'info' | 'warning' | 'alert' | 'success', targetTeacherId?: string) => void;
   quickAnnouncement?: { id: string; title: string; message: string; timestamp: string } | null;
+  schoolCancellations: any[];
+  onUpdateSchoolCancellations: (updated: any[]) => void;
 }
 
 const getSessionCategory = (sess: string) => {
@@ -72,7 +74,9 @@ export default function TeacherDashboard({
   onUpdateChanges,
   onAddAuditLog,
   onAddNotification,
-  quickAnnouncement
+  quickAnnouncement,
+  schoolCancellations,
+  onUpdateSchoolCancellations
 }: TeacherDashboardProps) {
   // Current active teacher simulator state
   const [selectedTeacherId, setSelectedTeacherId] = useState<string>('');
@@ -321,6 +325,66 @@ export default function TeacherDashboard({
       return next;
     });
     onAddNotification('Báo thức đã tắt', `Đã tắt báo thức ca dạy lúc ${time}`, 'warning');
+  };
+
+  const [schoolClosedModalSchedule, setSchoolClosedModalSchedule] = useState<Schedule | null>(null);
+  const [closedType, setClosedType] = useState<'arrived' | 'notified'>('arrived');
+  const [submittingClosed, setSubmittingClosed] = useState(false);
+
+  const handleOpenSchoolClosedModal = (sc: Schedule) => {
+    setSchoolClosedModalSchedule(sc);
+    setClosedType('arrived');
+  };
+
+  const handleSubmitSchoolClosed = async () => {
+    if (!schoolClosedModalSchedule || !currentTeacher) return;
+    setSubmittingClosed(true);
+    try {
+      const payload = {
+        date: todayStr,
+        scheduleId: schoolClosedModalSchedule.id,
+        teacherId: currentTeacher.id,
+        schoolId: schoolClosedModalSchedule.schoolId,
+        classId: schoolClosedModalSchedule.classId,
+        session: schoolClosedModalSchedule.session,
+        cancellationType: closedType,
+        periodsCredited: closedType === 'arrived' ? 1 : 0,
+        reason: ''
+      };
+
+      const res = await fetch('/api/school-cancellations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        const newCancellation = await res.json();
+        onUpdateSchoolCancellations([...schoolCancellations, newCancellation]);
+        
+        onAddAuditLog(
+          'Báo trường nghỉ', 
+          currentTeacher.name, 
+          `Báo trường nghỉ ca ${schoolClosedModalSchedule.session === 'morning' ? 'Sáng' : 'Chiều'} ngày ${todayStr} (${closedType === 'arrived' ? 'Đã tới trường' : 'Báo trước'})`
+        );
+        
+        onAddNotification(
+          'Báo Trường Nghỉ mới 🚫',
+          `Giáo viên ${currentTeacher.name} báo Trường Nghỉ ca ${schoolClosedModalSchedule.session === 'morning' ? 'Sáng' : 'Chiều'} ngày ${todayStr} (${closedType === 'arrived' ? 'Đã tới trường (+1 tiết)' : 'Được báo trước'}).`,
+          'warning'
+        );
+
+        customAlert('Thành công', 'Đã ghi nhận thông tin trường nghỉ.');
+        setSchoolClosedModalSchedule(null);
+      } else {
+        customAlert('Thất bại', 'Không thể gửi yêu cầu báo nghỉ.');
+      }
+    } catch (e) {
+      console.error(e);
+      customAlert('Lỗi', 'Đã xảy ra lỗi kết nối.');
+    } finally {
+      setSubmittingClosed(false);
+    }
   };
 
   // Dynamic calculations based on selected simulation coordinates
@@ -859,10 +923,14 @@ export default function TeacherDashboard({
   try { if (currentTeacher?.bonusPeriodsJSON) bonusPeriodsDict = JSON.parse(currentTeacher.bonusPeriodsJSON); } catch(e) {}
   const currentBonusPeriods = bonusPeriodsDict[reportMonth] || 0;
 
-  const totalVerifiedSchedules = regularPeriods + substitutePeriods + currentBonusPeriods;
+  const schoolClosedArrivedPeriods = currentTeacher 
+    ? schoolCancellations.filter(c => c.teacherId === currentTeacher.id && c.date.startsWith(reportMonth) && c.cancellationType === 'arrived').length 
+    : 0;
+
+  const totalVerifiedSchedules = regularPeriods + substitutePeriods + currentBonusPeriods + schoolClosedArrivedPeriods;
   
   const SUB_HOURLY_RATE = 55000;
-  const regularWagesEarned = currentTeacher ? (regularPeriods + currentBonusPeriods) * currentTeacher.hourlyRate : 0;
+  const regularWagesEarned = currentTeacher ? (regularPeriods + currentBonusPeriods + schoolClosedArrivedPeriods) * currentTeacher.hourlyRate : 0;
   const substituteWagesEarned = getSubstituteWages(substitutePeriods, SUB_HOURLY_RATE); // simple calc
   const totalWagesEarned = regularWagesEarned + substituteWagesEarned;
   
@@ -1067,6 +1135,8 @@ export default function TeacherDashboard({
                       <div className="space-y-2.5">
                         {todaySchedules.map(sc => {
   const isCheckedIn = attendance.some(a => a.teacherId === currentTeacher.id && a.date === todayStr && a.scheduleId === sc.id);
+  const cancellation = schoolCancellations.find(c => c.teacherId === currentTeacher.id && c.date === todayStr && c.scheduleId === sc.id);
+  const isCanceled = !!cancellation;
   return (
     <div key={sc.id} className="p-3 bg-neutral-50 hover:bg-neutral-100 rounded-2xl border border-neutral-150 transition flex items-center justify-between gap-3 text-xs shadow-sm">
       <div className="space-y-1">
@@ -1088,16 +1158,32 @@ export default function TeacherDashboard({
           <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded border border-emerald-100">
             ✓ Đã chấm
           </span>
+        ) : isCanceled ? (
+          <span className={`text-[10px] font-bold px-2 py-1 rounded border block ${
+            cancellation.cancellationType === 'arrived' 
+              ? 'text-orange-600 bg-orange-50 border-orange-100' 
+              : 'text-slate-600 bg-slate-50 border-slate-100'
+          }`}>
+            {cancellation.cancellationType === 'arrived' ? 'Trường nghỉ (Tới trường)' : 'Trường nghỉ (Báo trước)'}
+          </span>
         ) : (
-          <button 
-            onClick={() => {
-              setSelectedScheduleId(sc.id);
-              setMobileTab('checkin');
-            }}
-            className="bg-blue-600 hover:bg-blue-700 text-white font-bold p-1 px-3 rounded-full text-[10px] transition"
-          >
-            Điểm Danh
-          </button>
+          <div className="flex flex-col gap-1 items-end">
+            <button 
+              onClick={() => {
+                setSelectedScheduleId(sc.id);
+                setMobileTab('checkin');
+              }}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-bold p-1 px-3 rounded-full text-[10px] transition w-24 text-center block"
+            >
+              Điểm Danh
+            </button>
+            <button 
+              onClick={() => handleOpenSchoolClosedModal(sc)}
+              className="bg-rose-500 hover:bg-rose-600 text-white font-bold p-1 px-3 rounded-full text-[10px] transition w-24 text-center block"
+            >
+              Trường Nghỉ
+            </button>
+          </div>
         )}
       </div>
     </div>
@@ -1818,6 +1904,16 @@ export default function TeacherDashboard({
                       </div>
                     )}
 
+                    {schoolClosedArrivedPeriods > 0 && (
+                      <div className="flex justify-between pt-2">
+                        <span className="text-slate-500">Trường nghỉ (Tới nơi mới báo - {schoolClosedArrivedPeriods} ca):</span>
+                        <div className="text-right">
+                          <span className="font-mono text-emerald-600 font-semibold">+{((schoolClosedArrivedPeriods || 0) * (currentTeacher?.hourlyRate || 0)).toLocaleString('vi-VN')} đ</span>
+                          <span className="block text-[9px] text-emerald-500 italic">Hỗ trợ +1 tiết /ca</span>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="flex justify-between pt-2">
                       <span className="text-slate-500">Phụ cấp xăng xe:</span>
                       <span className="font-mono text-emerald-600">+{currentAllowance.toLocaleString('vi-VN')} đ</span>
@@ -2383,6 +2479,88 @@ export default function TeacherDashboard({
                     onClick={() => setAlertModal(null)}
                   >
                     Đã hiểu
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* School Closed Modal Overlay */}
+          {schoolClosedModalSchedule && (
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+              <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl border border-slate-100 animate-scaleIn">
+                <div className="p-6 space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-rose-50 rounded-xl text-rose-600">
+                      <AlertCircle className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h3 className="font-extrabold text-slate-900 text-base leading-tight">
+                        Báo Trường Nghỉ
+                      </h3>
+                      <span className="text-[10px] text-slate-500">
+                        {getClassName(schoolClosedModalSchedule.classId)} - {getSchoolName(schoolClosedModalSchedule.schoolId, schoolClosedModalSchedule)}
+                      </span>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-3 pt-2">
+                    <p className="text-xs text-slate-600 font-medium">Chọn phương án báo nghỉ của trường:</p>
+                    
+                    <button 
+                      onClick={() => setClosedType('arrived')}
+                      className={`w-full text-left p-3.5 rounded-2xl border transition flex flex-col gap-1 ${
+                        closedType === 'arrived' 
+                          ? 'border-blue-600 bg-blue-50/50 text-blue-900' 
+                          : 'border-slate-150 bg-slate-50 hover:bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                          closedType === 'arrived' ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white'
+                        }`}>
+                          {closedType === 'arrived' && <div className="w-1.5 h-1.5 rounded-full bg-white"></div>}
+                        </span>
+                        <span className="text-xs font-bold">1. Đã tới trường mới báo nghỉ</span>
+                      </div>
+                      <span className="text-[10px] text-slate-500 pl-6">Giáo viên được tính <strong className="text-blue-600 font-extrabold">+1 tiết dạy</strong>, không ảnh hưởng đến chuyên cần.</span>
+                    </button>
+
+                    <button 
+                      onClick={() => setClosedType('notified')}
+                      className={`w-full text-left p-3.5 rounded-2xl border transition flex flex-col gap-1 ${
+                        closedType === 'notified' 
+                          ? 'border-blue-600 bg-blue-50/50 text-blue-900' 
+                          : 'border-slate-150 bg-slate-50 hover:bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                          closedType === 'notified' ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white'
+                        }`}>
+                          {closedType === 'notified' && <div className="w-1.5 h-1.5 rounded-full bg-white"></div>}
+                        </span>
+                        <span className="text-xs font-bold">2. Được báo trước khi tới trường</span>
+                      </div>
+                      <span className="text-[10px] text-slate-500 pl-6">Giáo viên không được tính tiết dạy, không ảnh hưởng đến chuyên cần.</span>
+                    </button>
+                  </div>
+                </div>
+                
+                <div className="p-4 bg-slate-50 border-t border-slate-100 flex gap-2">
+                  <button 
+                    onClick={() => setSchoolClosedModalSchedule(null)}
+                    disabled={submittingClosed}
+                    className="flex-1 py-3 bg-white hover:bg-slate-100 text-slate-700 font-bold rounded-2xl text-xs border border-slate-200 transition"
+                  >
+                    HỦY BỎ
+                  </button>
+                  <button 
+                    onClick={handleSubmitSchoolClosed}
+                    disabled={submittingClosed}
+                    className="flex-1 py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-2xl text-xs shadow-md shadow-rose-500/10 transition flex items-center justify-center gap-1"
+                  >
+                    {submittingClosed ? 'ĐANG GỬI...' : 'ĐỒNG Ý BÁO'}
                   </button>
                 </div>
               </div>
