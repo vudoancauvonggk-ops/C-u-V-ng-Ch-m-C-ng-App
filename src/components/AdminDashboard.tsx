@@ -165,11 +165,10 @@ const SortableReportRow = ({ teacher, totalPeriods, formatVND, baseLessonsSalary
         <input 
           type="number" 
           step="0.5"
-          min="0"
-          className="w-16 px-2 py-1 text-xs border border-indigo-200 rounded text-center focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-slate-50 disabled:text-slate-400"
+          className="w-16 px-2 py-1 text-xs border border-indigo-200 rounded text-center focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
           value={currentBonusPeriods || ''}
-          disabled={new Date().getDate() > 2}
-          title={new Date().getDate() > 2 ? 'Chỉ được phép bổ sung tiết vào ngày 1 và 2 hàng tháng' : 'Nhập số tiết bổ sung (có thể lẻ 0.5)'}
+          placeholder="0"
+          title="Nhập số tiết điều chỉnh (+ để tăng, - để giảm, ví dụ: -1.5)"
           onChange={(e) => {
             const val = parseFloat(e.target.value) || 0;
             onUpdateBonus(val);
