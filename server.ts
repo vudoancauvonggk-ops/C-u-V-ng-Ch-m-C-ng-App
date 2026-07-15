@@ -54,12 +54,15 @@ async function startServer() {
 
   const sendPushNotification = async (targetUserId: string | null, payload: { title: string; message: string }) => {
     try {
+      console.log(`[Push] Initiating push notification. Target: ${targetUserId || 'ALL'}, Payload:`, payload);
       let subs;
       if (targetUserId) {
         subs = await db.select().from(pushSubscriptions).where(eq(pushSubscriptions.userId, targetUserId));
       } else {
         subs = await db.select().from(pushSubscriptions);
       }
+      
+      console.log(`[Push] Found ${subs.length} push subscriptions in database.`);
       
       const payloadStr = JSON.stringify(payload);
       
@@ -71,17 +74,24 @@ async function startServer() {
             p256dh: sub.keysP256dh
           }
         };
-        return webPush.sendNotification(pushSubscription, payloadStr).catch(async (err) => {
-          console.warn('Failed to send push notification, status:', err.statusCode);
-          if (err.statusCode === 404 || err.statusCode === 410) {
-            await db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, sub.id));
-          }
-        });
+        console.log(`[Push] Sending push to subscriber: ${sub.userId} (endpoint: ${sub.endpoint.substring(0, 45)}...)`);
+        return webPush.sendNotification(pushSubscription, payloadStr)
+          .then((res) => {
+            console.log(`[Push] Successfully sent push to ${sub.userId}, response status:`, res.statusCode);
+          })
+          .catch(async (err) => {
+            console.error(`[Push] Failed to send push to ${sub.userId}, status: ${err.statusCode}, error:`, err.message || err);
+            if (err.statusCode === 404 || err.statusCode === 410) {
+              console.log(`[Push] Removing expired subscription for ${sub.userId}`);
+              await db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, sub.id));
+            }
+          });
       });
       
       await Promise.all(promises);
+      console.log(`[Push] Finished sending push notifications.`);
     } catch (e) {
-      console.error('Error sending push notifications:', e);
+      console.error('[Push] Error in sendPushNotification:', e);
     }
   };
 
