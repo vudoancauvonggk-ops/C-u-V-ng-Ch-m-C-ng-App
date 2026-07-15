@@ -1786,39 +1786,7 @@ async function startServer() {
       }
     }));
     
-    // Serve a self-destructing service worker to forcefully unregister old PWAs and clear caches
-    app.get('/sw.js', (req, res) => {
-      res.setHeader('Content-Type', 'application/javascript');
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-      res.send(`
-        self.addEventListener('install', (e) => {
-          self.skipWaiting();
-        });
-
-        self.addEventListener('activate', (e) => {
-          e.waitUntil(
-            caches.keys().then((cacheNames) => {
-              return Promise.all(
-                cacheNames.map((cacheName) => {
-                  return caches.delete(cacheName);
-                })
-              );
-            }).then(() => {
-              return self.clients.claim();
-            }).then(() => {
-              return self.clients.matchAll({ type: 'window' });
-            }).then((clients) => {
-              clients.forEach((client) => {
-                if (client.url && client.navigate) {
-                  client.navigate(client.url);
-                }
-              });
-              return self.registration.unregister();
-            })
-          );
-        });
-      `);
-    });
+    // Static assets will serve sw.js from distPath automatically
     
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
