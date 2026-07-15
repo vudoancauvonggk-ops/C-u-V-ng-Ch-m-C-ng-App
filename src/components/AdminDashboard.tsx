@@ -146,7 +146,7 @@ const SortableSchoolRow = ({ sch, schClasses, onEdit, onDelete, setSelectedQR }:
 };
 
 
-const SortableReportRow = ({ teacher, totalPeriods, formatVND, baseLessonsSalary, allowance, hasApprovedLeave, attendanceBonus, potentialBonus, artPerformanceBonus, socialInsurance, advanceSalary, deduction, finalWage, currentBonusPeriods, onUpdateBonus }: any) => {
+const SortableReportRow = ({ teacher, totalPeriods, formatVND, baseLessonsSalary, allowance, hasApprovedLeave, attendanceBonus, potentialBonus, artPerformanceBonus, socialInsurance, advanceSalary, deduction, finalWage, currentBonusPeriods, onUpdateBonus, isAdmin }: any) => {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: teacher.id });
   const style = { transform: CSS.Transform.toString(transform), transition, backgroundColor: transform ? 'rgba(255,255,255,0.9)' : undefined, zIndex: transform ? 999 : 'auto' };
 
@@ -165,10 +165,11 @@ const SortableReportRow = ({ teacher, totalPeriods, formatVND, baseLessonsSalary
         <input 
           type="number" 
           step="0.5"
-          className="w-16 px-2 py-1 text-xs border border-indigo-200 rounded text-center focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
+          className="w-16 px-2 py-1 text-xs border border-indigo-200 rounded text-center focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white disabled:bg-slate-100 disabled:text-slate-455"
           value={currentBonusPeriods || ''}
           placeholder="0"
-          title="Nhập số tiết điều chỉnh (+ để tăng, - để giảm, ví dụ: -1.5)"
+          disabled={!isAdmin}
+          title={isAdmin ? "Nhập số tiết điều chỉnh (+ để tăng, - để giảm, ví dụ: -1.5)" : "Chỉ Admin mới có quyền điều chỉnh số tiết"}
           onChange={(e) => {
             const val = parseFloat(e.target.value) || 0;
             onUpdateBonus(val);
@@ -3555,6 +3556,7 @@ export default function AdminDashboard({
                               advanceSalary={advanceSalary}
                               deduction={deduction}
                               finalWage={finalWage}
+                              isAdmin={currentUser?.role === 'admin'}
                             />
                           );
                         })}

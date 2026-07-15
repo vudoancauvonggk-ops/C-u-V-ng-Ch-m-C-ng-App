@@ -175,6 +175,15 @@ export default function App() {
     }
   };
 
+  // Auto-request push notification permission on login
+  useEffect(() => {
+    if (currentUser && 'Notification' in window && Notification.permission === 'default') {
+      setTimeout(() => {
+        Notification.requestPermission().catch(console.error);
+      }, 5000);
+    }
+  }, [currentUser]);
+
   // Startup useEffect: Fetch PostgreSQL state on initialization & poll for updates to keep frontend in perfect sync with the DB
   useEffect(() => {
     let currentServerVersion: string | null = null;
@@ -896,6 +905,21 @@ export default function App() {
       saveStoredData(nextState);
       return nextState;
     });
+
+    // Show native device notification if permissions granted
+    if ('Notification' in window && Notification.permission === 'granted') {
+      const isTargetedToMe = !targetTeacherId || targetTeacherId === currentUser?.teacherId;
+      if (isTargetedToMe) {
+        try {
+          new Notification(title, {
+            body: message,
+            icon: '/logo_cauvong.jpg'
+          });
+        } catch (e) {
+          console.warn('Failed to trigger native notification:', e);
+        }
+      }
+    }
 
     try {
       await fetch('/api/notifications', {

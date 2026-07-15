@@ -305,6 +305,13 @@ export default function TeacherDashboard({
       return getWeight(a.session) - getWeight(b.session);
     });
 
+  // Find all approved substitute assignments for this teacher starting from today
+  const upcomingSubRequests = changes.filter(c => 
+    c.status === 'approved' && 
+    c.targetTeacherId === currentTeacher?.id && 
+    c.date >= todayStr
+  );
+
   // Find substitute assignments for today
   if (currentTeacher) {
     const todaySubRequests = changes.filter(c => 
@@ -920,6 +927,38 @@ export default function TeacherDashboard({
                       </h2>
                       <p className="text-xs text-slate-500 font-medium">Chúc bạn một ngày làm việc hiệu quả và tràn đầy năng lượng.</p>
                     </div>
+
+                    {upcomingSubRequests.length > 0 && (
+                      <div className="mb-4 bg-amber-50 border border-amber-200 rounded-3xl p-4 flex gap-3 shadow-sm relative overflow-hidden group">
+                        <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
+                          <Bell className="w-20 h-20 text-amber-550" />
+                        </div>
+                        <div className="p-2 bg-amber-100 rounded-2xl text-amber-700 shrink-0 self-start">
+                          <AlertCircle className="w-5 h-5" />
+                        </div>
+                        <div className="space-y-1 relative z-10">
+                          <h4 className="text-xs font-extrabold text-amber-900 uppercase tracking-wide flex items-center gap-1.5">
+                            🔔 LỊCH DẠY THAY CHƯA CHẤM CÔNG
+                          </h4>
+                          <p className="text-[11px] text-amber-850 leading-relaxed">
+                            Bạn được phân công dạy thay vào các ngày sau:
+                          </p>
+                          <ul className="text-[11px] text-amber-900 font-semibold space-y-1 list-disc list-inside mt-1 font-mono">
+                            {upcomingSubRequests.map((req, idx) => {
+                              const origName = teachers.find(t => t.id === req.originalTeacherId || t.id === req.teacherId)?.name || 'Đồng nghiệp';
+                              return (
+                                <li key={req.id || idx}>
+                                  Ngày {req.date} ({req.session === 'morning' ? 'Sáng' : 'Chiều'}) - Dạy thay: {origName}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                          <p className="text-[10px] text-amber-600 italic mt-2">
+                            Vui lòng kiểm tra tab <span className="font-bold underline">"Dạy Dùm"</span> để xem chi tiết lịch học và tab <span className="font-bold underline">"Định vị"</span> để chấm công đúng vị trí.
+                          </p>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Teacher Profile Card with beautiful badge */}
                     <div className="bg-gradient-to-br from-indigo-900 to-slate-900 text-white p-5 rounded-3xl shadow-md space-y-3 relative overflow-hidden">
