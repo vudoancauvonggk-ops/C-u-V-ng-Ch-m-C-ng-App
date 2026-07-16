@@ -3850,18 +3850,28 @@ export default function AdminDashboard({
                   return schools.map(sch => {
                     const sLogs = attendance.filter(a => a.schoolId === sch.id && a.date.startsWith(reportMonth));
                     const totalPeriods = sLogs.reduce((sum, curr) => sum + curr.periods, 0);
-                    
                     const schoolClasses = classes.filter(c => c.schoolId === sch.id);
-                    const numClasses = schoolClasses.length;
-
                     const monthCancellations = schoolCancellations.filter(c => c.schoolId === sch.id && c.date.startsWith(reportMonth));
                     const numCancellations = monthCancellations.length;
 
-                    const classNotes = schoolClasses.map(cls => {
+                    // Group expected sessions by trimmed class name
+                    const classSessionsMap: Record<string, number> = {};
+                    schoolClasses.forEach(cls => {
                       const classSchedules = rawSchedules.filter(s => s.classId === cls.id && !s.isDeleted);
                       const classSessions = classSchedules.reduce((sum, s) => sum + (dayOfWeekOccurrences[s.dayOfWeek] || 0), 0);
-                      return { name: cls.name, sessions: classSessions };
+                      
+                      const trimmedName = cls.name.trim();
+                      if (classSessions > 0) {
+                        classSessionsMap[trimmedName] = (classSessionsMap[trimmedName] || 0) + classSessions;
+                      }
                     });
+
+                    const classNotes = Object.entries(classSessionsMap).map(([name, sessions]) => ({
+                      name,
+                      sessions
+                    }));
+
+                    const numClasses = classNotes.length;
 
                     return (
                       <div key={sch.id} className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex flex-col justify-between gap-3 shadow-sm hover:shadow transition">
