@@ -24,6 +24,19 @@ const AVAILABLE_PERMISSIONS = [
   { value: 'can_manage_meeting_attendance', label: 'Điểm danh họp & chuyên môn' }
 ];
 
+const ensureArray = (val: any): string[] => {
+  if (Array.isArray(val)) return val;
+  if (typeof val === 'string') {
+    try {
+      const parsed = JSON.parse(val);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return val ? [val] : [];
+    }
+  }
+  return [];
+};
+
 interface AdminDashboardProps {
   teachers: Teacher[];
   schools: School[];
@@ -239,11 +252,11 @@ const SortableUserRow = ({ u, linkedTeacher, AVAILABLE_PERMISSIONS, setEditingUs
       <td className="p-4 max-w-xs">
         {u.role === 'admin' ? (
           <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md font-semibold">Tất cả đặc quyền hệ thống</span>
-        ) : !u.permissions || (Array.isArray(u.permissions) ? u.permissions.length === 0 : (() => { try { return JSON.parse(u.permissions).length === 0 } catch { return true } })()) ? (
+        ) : ensureArray(u.permissions).length === 0 ? (
           <span className="text-slate-400 italic text-[11px]">Chưa cấp quyền riêng lẻ</span>
         ) : (
           <div className="flex flex-wrap gap-1">
-            {(Array.isArray(u.permissions) ? u.permissions : (() => { try { return JSON.parse(u.permissions || '[]') } catch { return [] } })()).map((p: string) => {
+            {ensureArray(u.permissions).map((p: string) => {
               const friendly = AVAILABLE_PERMISSIONS.find((ap: any) => ap.value === p)?.label || p;
               return (
                 <span key={p} className="text-[9px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-md" title={friendly}>
@@ -260,7 +273,7 @@ const SortableUserRow = ({ u, linkedTeacher, AVAILABLE_PERMISSIONS, setEditingUs
             onClick={() => {
               setEditingUser({ 
                 ...u, 
-                permissions: typeof u.permissions === 'string' ? (() => { try { return JSON.parse(u.permissions || '[]') } catch { return [] } })() : (u.permissions || [])
+                permissions: ensureArray(u.permissions)
               });
               setShowUserModal(true);
             }}
@@ -5159,14 +5172,14 @@ export default function AdminDashboard({
                   </h5>
                   <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
                     {AVAILABLE_PERMISSIONS.map((ap) => {
-                      const isChecked = (editingUser.permissions || []).includes(ap.value);
+                      const currentPerms = ensureArray(editingUser.permissions);
+                      const isChecked = currentPerms.includes(ap.value);
                       return (
                         <label key={ap.value} className="flex items-start gap-2.5 p-1.5 hover:bg-white rounded-lg transition-colors cursor-pointer">
                           <input 
                             type="checkbox" 
                             checked={isChecked}
                             onChange={(e) => {
-                              const currentPerms = editingUser.permissions || [];
                               const nextPerms = e.target.checked 
                                 ? [...currentPerms, ap.value]
                                 : currentPerms.filter(p => p !== ap.value);

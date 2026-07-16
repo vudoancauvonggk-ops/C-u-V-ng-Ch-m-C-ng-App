@@ -109,8 +109,21 @@ export default function App() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   const handleLoginSuccess = (user: AppUser) => {
-    setCurrentUser(user);
-    localStorage.setItem('etms_current_user', JSON.stringify(user));
+    let parsed: any = [];
+    try {
+      parsed = typeof user.permissions === 'string' ? JSON.parse(user.permissions || '[]') : user.permissions;
+      if (typeof parsed === 'string') {
+        parsed = JSON.parse(parsed);
+      }
+    } catch {
+      parsed = [];
+    }
+    if (!Array.isArray(parsed)) {
+      parsed = [];
+    }
+    const normalizedUser = { ...user, permissions: parsed };
+    setCurrentUser(normalizedUser);
+    localStorage.setItem('etms_current_user', JSON.stringify(normalizedUser));
   };
 
   const handleLogout = () => {
@@ -204,7 +217,7 @@ export default function App() {
           if (dbState && dbState.teachers) {
             if (dbState.users && Array.isArray(dbState.users)) {
               dbState.users = dbState.users.map((u: any) => {
-                let parsed = [];
+                let parsed: any = [];
                 try {
                   parsed = typeof u.permissions === 'string' ? JSON.parse(u.permissions || '[]') : u.permissions;
                   if (typeof parsed === 'string') {
@@ -212,6 +225,9 @@ export default function App() {
                   }
                 } catch (e) {
                   console.error('Failed to parse permissions for user', u.id, e);
+                  parsed = [];
+                }
+                if (!Array.isArray(parsed)) {
                   parsed = [];
                 }
                 return { ...u, permissions: parsed };
