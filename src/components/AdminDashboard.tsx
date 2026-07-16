@@ -456,6 +456,13 @@ export default function AdminDashboard({
   const [dashboardHistoryMonth, setDashboardHistoryMonth] = useState<string>('06');
   const [trashCategory, setTrashCategory] = useState<'schedules' | 'teachers' | 'schools' | 'classes'>('schedules');
   const [selectedCancellationSchool, setSelectedCancellationSchool] = useState<{ school: School, cancellations: any[] } | null>(null);
+  const [quickEditClassData, setQuickEditClassData] = useState<{
+    name: string;
+    schoolId: string;
+    classesToUpdate: ClassInfo[];
+  } | null>(null);
+  const [newSchoolNameInline, setNewSchoolNameInline] = useState('');
+  const [showCreateSchoolInline, setShowCreateSchoolInline] = useState(false);
 
   // Fine-grained permission helper
   const getAvailableTeachersForDateSession = (dateStr: string, session: string, excludeTeacherId: string) => {
@@ -3903,9 +3910,27 @@ export default function AdminDashboard({
                           <div className="text-[10px] text-slate-500 bg-slate-100/50 p-2 rounded-lg border border-slate-150/40 space-y-0.5">
                             <div className="font-bold text-[8.5px] text-slate-400 uppercase tracking-wider font-mono">Dự kiến số buổi dạy:</div>
                             {classNotes.map((note, idx) => (
-                              <div key={idx} className="flex justify-between items-center">
-                                <span className="font-semibold">{note.name}</span>
-                                <span className="font-mono font-bold text-slate-700">{note.sessions} buổi</span>
+                              <div key={idx} className="flex justify-between items-center group/item hover:bg-slate-200/50 p-0.5 rounded transition">
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span className="font-semibold truncate">{note.name}</span>
+                                  <button
+                                    onClick={() => {
+                                      const matchingClasses = schoolClasses.filter(c => c.name.trim() === note.name);
+                                      setQuickEditClassData({
+                                        name: note.name,
+                                        schoolId: sch.id,
+                                        classesToUpdate: matchingClasses
+                                      });
+                                      setShowCreateSchoolInline(false);
+                                      setNewSchoolNameInline('');
+                                    }}
+                                    className="p-0.5 hover:bg-slate-250 rounded text-slate-400 hover:text-blue-600 transition shrink-0"
+                                    title="Sửa lớp / Chuyển trường"
+                                  >
+                                    <Edit2 className="w-2.5 h-2.5" />
+                                  </button>
+                                </div>
+                                <span className="font-mono font-bold text-slate-700 shrink-0">{note.sessions} buổi</span>
                               </div>
                             ))}
                           </div>
@@ -5325,6 +5350,161 @@ export default function AdminDashboard({
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition"
               >
                 ĐÓNG
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {quickEditClassData && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-100 animate-fadeIn">
+          <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl border border-slate-100 animate-scaleUp p-6 space-y-4">
+            <div className="flex items-center justify-between border-b pb-3 border-slate-100">
+              <h3 className="font-bold text-slate-800 text-sm font-sans flex items-center gap-2">
+                <Edit2 className="w-4 h-4 text-blue-600" /> Chỉnh Sửa / Chuyển Trường Lớp Học
+              </h3>
+              <button 
+                onClick={() => setQuickEditClassData(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-50 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3.5">
+              <div className="space-y-1">
+                <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider font-mono">Tên lớp học:</label>
+                <input 
+                  type="text"
+                  value={quickEditClassData.name}
+                  onChange={(e) => setQuickEditClassData({ ...quickEditClassData, name: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 rounded-xl px-3.5 py-2 text-xs text-slate-800 focus:outline-none transition"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex justify-between items-center">
+                  <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider font-mono">Trường học:</label>
+                  <button 
+                    onClick={() => {
+                      setShowCreateSchoolInline(!showCreateSchoolInline);
+                      setNewSchoolNameInline('');
+                    }}
+                    className="text-[10px] text-blue-600 hover:text-blue-800 font-bold"
+                  >
+                    {showCreateSchoolInline ? '← Chọn trường sẵn có' : '+ Tạo trường mới'}
+                  </button>
+                </div>
+
+                {!showCreateSchoolInline ? (
+                  <select 
+                    value={quickEditClassData.schoolId}
+                    onChange={(e) => setQuickEditClassData({ ...quickEditClassData, schoolId: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none transition"
+                  >
+                    {schools.map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="space-y-2">
+                    <input 
+                      type="text"
+                      placeholder="Nhập tên trường mới..."
+                      value={newSchoolNameInline}
+                      onChange={(e) => setNewSchoolNameInline(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 rounded-xl px-3.5 py-2 text-xs text-slate-800 focus:outline-none transition"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
+              <button 
+                onClick={() => setQuickEditClassData(null)}
+                className="px-4 py-2 hover:bg-slate-50 text-slate-500 rounded-xl text-xs font-bold border border-slate-100 transition"
+              >
+                HỦY
+              </button>
+              <button 
+                onClick={async () => {
+                  if (!quickEditClassData.name.trim()) {
+                    alert('Tên lớp không được để trống.');
+                    return;
+                  }
+
+                  try {
+                    let targetSchoolId = quickEditClassData.schoolId;
+
+                    if (showCreateSchoolInline) {
+                      if (!newSchoolNameInline.trim()) {
+                        alert('Vui lòng nhập tên trường mới.');
+                        return;
+                      }
+                      
+                      const newSchoolId = `sch_${Date.now()}`;
+                      const newSchoolObj = {
+                        id: newSchoolId,
+                        name: newSchoolNameInline.trim(),
+                        address: '',
+                        radius: 300,
+                        lat: 10.8231,
+                        lng: 106.6297,
+                        contactPerson: '',
+                        phone: '',
+                        qrCodeData: '',
+                        isDeleted: false,
+                        createdAt: new Date().toISOString()
+                      };
+
+                      const updatedSchools = [...rawSchools, newSchoolObj];
+                      onUpdateSchools(updatedSchools);
+                      onAddAuditLog('Tạo trường học', 'Admin', `Tạo trường đối tác mới '${newSchoolNameInline.trim()}' quick-edit`);
+
+                      await fetch('/api/schools', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(newSchoolObj)
+                      });
+
+                      targetSchoolId = newSchoolId;
+                    }
+
+                    const updatedClasses = rawClasses.map(c => {
+                      const toUpdate = quickEditClassData.classesToUpdate.find(tu => tu.id === c.id);
+                      if (toUpdate) {
+                        return {
+                          ...c,
+                          name: quickEditClassData.name.trim(),
+                          schoolId: targetSchoolId
+                        };
+                      }
+                      return c;
+                    });
+
+                    onUpdateClasses(updatedClasses);
+                    onAddAuditLog('Chỉnh sửa lớp học', 'Admin', `Cập nhật nhanh lớp học '${quickEditClassData.name.trim()}' (chuyển sang trường ${targetSchoolId})`);
+
+                    await Promise.all(quickEditClassData.classesToUpdate.map(c => 
+                      fetch(`/api/classes/${c.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          name: quickEditClassData.name.trim(),
+                          schoolId: targetSchoolId
+                        })
+                      })
+                    ));
+
+                    setQuickEditClassData(null);
+                  } catch (err) {
+                    console.error('Failed to quick-edit classes:', err);
+                    alert('Có lỗi xảy ra khi cập nhật lớp học.');
+                  }
+                }}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
+              >
+                LƯU LẠI
               </button>
             </div>
           </div>
