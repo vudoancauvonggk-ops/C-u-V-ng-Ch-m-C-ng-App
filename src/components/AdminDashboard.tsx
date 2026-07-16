@@ -6,7 +6,7 @@ import {
   Users, Building, Calendar, DollarSign, FileSpreadsheet, FileText, 
   Plus, Edit2, Trash2, GripVertical, Check, X, ShieldAlert, MapPin, QrCode, 
   Clock, ArrowLeftRight, Search, Printer, RefreshCw, AlertTriangle, Eye, CheckCircle2,
-  ShieldCheck, Download, Upload, Activity, Camera, Megaphone, Send
+  ShieldCheck, Download, Upload, Activity, Camera, Megaphone, Send, GitMerge
 } from 'lucide-react';
 import { Teacher, School, ClassInfo, Schedule, AttendanceLog, ChangeRequest, AuditLog, SystemNotification, AppUser, AppSettings, MeetingAttendance } from '../types';
 import SheetsSyncModal from './SheetsSyncModal';
@@ -463,6 +463,7 @@ export default function AdminDashboard({
   } | null>(null);
   const [newSchoolNameInline, setNewSchoolNameInline] = useState('');
   const [showCreateSchoolInline, setShowCreateSchoolInline] = useState(false);
+  const [targetMergeClassId, setTargetMergeClassId] = useState('');
   const [schoolFilterText, setSchoolFilterText] = useState('');
 
   // Fine-grained permission helper
@@ -4052,6 +4053,7 @@ export default function AdminDashboard({
                                             });
                                             setShowCreateSchoolInline(false);
                                             setNewSchoolNameInline('');
+                                            setTargetMergeClassId('');
                                           }}
                                           className="p-0.5 hover:bg-slate-250 rounded text-slate-400 hover:text-blue-600 transition shrink-0"
                                           title="Sửa lớp / Chuyển trường"
@@ -5574,6 +5576,99 @@ export default function AdminDashboard({
                 )}
               </div>
             </div>
+
+            {/* Merge Classes Section */}
+            {(() => {
+              const mergeCandidateClasses = rawClasses.filter(c => 
+                c.schoolId === quickEditClassData.schoolId && 
+                !c.isDeleted && 
+                !quickEditClassData.classesToUpdate.some(tu => tu.id === c.id)
+              );
+
+              if (mergeCandidateClasses.length === 0) return null;
+
+              return (
+                <div className="pt-3.5 border-t border-slate-100 space-y-2">
+                  <div className="flex items-center gap-1.5 text-rose-600 font-bold text-[10px] uppercase tracking-wider font-mono">
+                    <GitMerge className="w-3.5 h-3.5" /> Gộp lớp (Xử lý trùng lặp)
+                  </div>
+                  <p className="text-[10px] text-slate-450 leading-normal">
+                    Chọn lớp đúng cùng trường để gộp lớp này vào. Lịch dạy và điểm danh sẽ được chuyển sang lớp được chọn.
+                  </p>
+                  <div className="flex gap-2">
+                    <select
+                      value={targetMergeClassId}
+                      onChange={(e) => setTargetMergeClassId(e.target.value)}
+                      className="flex-1 bg-slate-50 border border-slate-200 focus:border-blue-500 rounded-xl px-3 py-1.5 text-xs text-slate-800 focus:outline-none transition font-medium"
+                    >
+                      <option value="">-- Chọn lớp để gộp vào --</option>
+                      {mergeCandidateClasses.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={async () => {
+                        if (!targetMergeClassId) {
+                          alert('Vui lòng chọn một lớp để gộp vào.');
+                          return;
+                        }
+
+                        const sourceClasses = quickEditClassData.classesToUpdate;
+                        const sourceClassName = quickEditClassData.name;
+                        const targetClassObj = mergeCandidateClasses.find(c => c.id === targetMergeClassId);
+                        const targetClassName = targetClassObj ? targetClassObj.name : '';
+
+                        if (!confirm(`Bạn có chắc chắn muốn gộp các lớp có tên '${sourceClassName}' vào lớp '${targetClassName}' không?\nTất cả lịch dạy và dữ liệu điểm danh sẽ được chuyển sang lớp '${targetClassName}'. Lớp '${sourceClassName}' sẽ bị xóa. Hành động này không thể hoàn tác!`)) {
+                          return;
+                        }
+
+                        try {
+                          await Promise.all(sourceClasses.map(sc => 
+                            fetch('/api/classes/merge', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                sourceClassId: sc.id,
+                                targetClassId: targetMergeClassId
+                              })
+                            })
+                          ));
+
+                          const deletedIds = sourceClasses.map(sc => sc.id);
+                          
+                          const updatedClasses = rawClasses.map(c => 
+                            deletedIds.includes(c.id) ? { ...c, isDeleted: true, deletedAt: new Date().toISOString() } : c
+                          );
+                          onUpdateClasses(updatedClasses);
+
+                          const updatedSchedules = rawSchedules.map(s => 
+                            deletedIds.includes(s.classId) ? { ...s, classId: targetMergeClassId } : s
+                          );
+                          onUpdateSchedules(updatedSchedules);
+
+                          if (attendance && onUpdateAttendance) {
+                            const updatedAttendance = attendance.map(a => 
+                              deletedIds.includes(a.classId) ? { ...a, classId: targetMergeClassId } : a
+                            );
+                            onUpdateAttendance(updatedAttendance);
+                          }
+
+                          onAddAuditLog('Gộp lớp học', 'Admin', `Gộp thành công lớp '${sourceClassName}' vào lớp '${targetClassName}'`);
+                          alert('Gộp lớp thành công!');
+                          setQuickEditClassData(null);
+                        } catch (err) {
+                          console.error('Failed to merge classes:', err);
+                          alert('Có lỗi xảy ra khi gộp lớp.');
+                        }
+                      }}
+                      className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition shadow-sm shrink-0"
+                    >
+                      GỘP
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
 
             <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
               <button 

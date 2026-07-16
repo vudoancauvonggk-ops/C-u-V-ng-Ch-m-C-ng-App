@@ -1298,6 +1298,29 @@ async function startServer() {
     }
   });
 
+  app.post('/api/classes/merge', async (req, res) => {
+    try {
+      const { sourceClassId, targetClassId } = req.body;
+      if (!sourceClassId || !targetClassId) {
+        return res.status(400).json({ error: 'Missing sourceClassId or targetClassId' });
+      }
+
+      await db.update(schedules).set({ classId: targetClassId }).where(eq(schedules.classId, sourceClassId));
+      await db.update(attendance).set({ classId: targetClassId }).where(eq(attendance.classId, sourceClassId));
+      await db.update(schoolCancellations).set({ classId: targetClassId }).where(eq(schoolCancellations.classId, sourceClassId));
+
+      await db.update(classes).set({ 
+        isDeleted: true, 
+        deletedAt: new Date().toISOString() 
+      }).where(eq(classes.id, sourceClassId));
+
+      res.json({ success: true, message: `Merged class ${sourceClassId} into ${targetClassId} successfully` });
+    } catch (err: any) {
+      console.error('Failed to merge classes:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.put('/api/classes/:id', async (req, res) => {
     try {
       const { id } = req.params;
