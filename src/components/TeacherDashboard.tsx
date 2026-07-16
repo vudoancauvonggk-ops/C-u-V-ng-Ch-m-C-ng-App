@@ -798,6 +798,81 @@ export default function TeacherDashboard({
     setScannedQR('');
   };
 
+  const getPastMissedSessions = () => {
+    if (!currentTeacher) return [];
+
+    const missed: Array<{ id: string; date: string; session: string; label: string; reason: string; schedule?: Schedule }> = [];
+    
+    const pastMonthDate = new Date();
+    pastMonthDate.setMonth(pastMonthDate.getMonth() - 1);
+    const pastMonthStr = pastMonthDate.toISOString().split('T')[0];
+    const todayStrYmd = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`;
+
+    // 1. Get approved leaves
+    const approvedLeaves = changes.filter(c => 
+      c.teacherId === currentTeacher.id &&
+      c.status === 'approved' &&
+      c.date >= pastMonthStr &&
+      c.date <= todayStrYmd &&
+      (c.requestType === 'sick_leave' || (c.requestType === 'substitute_teacher' && !c.targetTeacherId))
+    );
+
+    approvedLeaves.forEach(c => {
+      const [y, m, d] = c.date.split('-');
+      const reqDateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+      const reqDayOfWeek = reqDateObj.getDay() === 0 ? 8 : reqDateObj.getDay() + 1;
+      const origSched = schedules.find(s => s.teacherId === currentTeacher.id && s.dayOfWeek === reqDayOfWeek && getSessionCategory(s.session) === c.session && !s.isDeleted);
+      const schoolName = origSched ? getSchoolName(origSched.schoolId, origSched) : '';
+      const classNameStr = origSched ? getClassName(origSched.classId) : '';
+      
+      missed.push({
+        id: `leave_${c.id}`,
+        date: c.date,
+        session: c.session,
+        label: `${d}/${m}/${y} (${c.session === 'morning' ? 'Sáng' : 'Chiều'}) - ${schoolName || 'Lịch dạy'} (Nghỉ phép có đơn)`,
+        reason: c.reason,
+        schedule: origSched
+      });
+    });
+
+    // 2. Scan past 30 days for weekly schedules that have no attendance logs
+    for (let i = 30; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      
+      if (dStr > todayStrYmd) continue;
+      
+      const dayOfWeek = d.getDay() === 0 ? 8 : d.getDay() + 1;
+      const daySchedules = schedules.filter(s => s.teacherId === currentTeacher.id && s.dayOfWeek === dayOfWeek && !s.isDeleted);
+      
+      daySchedules.forEach(s => {
+        const cName = getClassName(s.classId).toLowerCase();
+        const sName = getSchoolName(s.schoolId, s).toLowerCase();
+        if (cName.includes('chuyên môn') || sName.includes('chuyên môn') || cName.includes('họp') || sName.includes('họp')) return;
+
+        const hasLog = attendance.some(a => !(a as any).isDeleted && a.teacherId === currentTeacher.id && a.date === dStr && a.scheduleId === s.id);
+        const hasLeave = approvedLeaves.some(c => c.date === dStr && c.session === getSessionCategory(s.session));
+        
+        if (!hasLog && !hasLeave) {
+          const [y, m, dayVal] = dStr.split('-');
+          const schoolName = getSchoolName(s.schoolId, s);
+          const classNameStr = getClassName(s.classId);
+          missed.push({
+            id: `missed_${s.id}_${dStr}`,
+            date: dStr,
+            session: getSessionCategory(s.session),
+            label: `${dayVal}/${m}/${y} (${getSessionCategory(s.session) === 'morning' ? 'Sáng' : 'Chiều'}) - ${schoolName} - Lớp ${classNameStr} (Chưa điểm danh)`,
+            reason: 'Không có dữ liệu điểm danh',
+            schedule: s
+          });
+        }
+      });
+    }
+
+    return missed.sort((a, b) => b.date.localeCompare(a.date));
+  };
+
   // Submit Shift Proposal
   const handleRequestShiftChange = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1739,19 +1814,34 @@ export default function TeacherDashboard({
                               const val = e.target.value;
                               setSelectedPastLeaveId(val);
                               if (val) {
-                                const req = changes.find(c => c.id === val);
-                                if (req) {
-                                  const [y, m, d] = req.date.split('-');
-                                  const reqDateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
-                                  const reqDayOfWeek = reqDateObj.getDay() === 0 ? 8 : reqDateObj.getDay() + 1;
-                                  const origSched = schedules.find(s => s.teacherId === currentTeacher.id && s.dayOfWeek === reqDayOfWeek && getSessionCategory(s.session) === req.session && !s.isDeleted);
-                                  
-                                  const schoolName = origSched ? getSchoolName(origSched.schoolId, origSched) : '';
-                                  const classNameStr = origSched ? getClassName(origSched.classId) : '';
-                                  const dateStrFormatted = `${d}/${m}/${y}`;
-                                  
-                                  setReqSession(req.session);
-                                  setReqReason(`[Dạy bù cho ca nghỉ ngày ${dateStrFormatted}] ${schoolName ? `Trường ${schoolName} - Lớp ${classNameStr}.` : ''} Lý do gốc: ${req.reason}`);
+                                if (val.startsWith('leave_')) {
+                                  const id = val.replace('leave_', '');
+                                  const req = changes.find(c => c.id === id);
+                                  if (req) {
+                                    const [y, m, d] = req.date.split('-');
+                                    const reqDateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+                                    const reqDayOfWeek = reqDateObj.getDay() === 0 ? 8 : reqDateObj.getDay() + 1;
+                                    const origSched = schedules.find(s => s.teacherId === currentTeacher.id && s.dayOfWeek === reqDayOfWeek && getSessionCategory(s.session) === req.session && !s.isDeleted);
+                                    
+                                    const schoolName = origSched ? getSchoolName(origSched.schoolId, origSched) : '';
+                                    const classNameStr = origSched ? getClassName(origSched.classId) : '';
+                                    const dateStrFormatted = `${d}/${m}/${y}`;
+                                    
+                                    setReqSession(req.session);
+                                    setReqReason(`[Dạy bù cho ca nghỉ ngày ${dateStrFormatted}] ${schoolName ? `Trường ${schoolName} - Lớp ${classNameStr}.` : ''} Lý do gốc: ${req.reason}`);
+                                  }
+                                } else if (val.startsWith('missed_')) {
+                                  const parts = val.split('_');
+                                  const schedId = parts[1];
+                                  const dateStr = parts.slice(2).join('_');
+                                  const sched = schedules.find(s => s.id === schedId);
+                                  if (sched) {
+                                    const [y, m, d] = dateStr.split('-');
+                                    const schoolName = getSchoolName(sched.schoolId, sched);
+                                    const classNameStr = getClassName(sched.classId);
+                                    setReqSession(getSessionCategory(sched.session));
+                                    setReqReason(`[Dạy bù cho ca vắng ngày ${d}/${m}/${y}] Trường ${schoolName} - Lớp ${classNameStr}. (Chưa điểm danh)`);
+                                  }
                                 }
                               } else {
                                 setReqReason('');
@@ -1759,30 +1849,9 @@ export default function TeacherDashboard({
                             }}
                           >
                             <option value="">-- Chọn ca đã nghỉ --</option>
-                            {(() => {
-                              const pastMonthDate = new Date();
-                              pastMonthDate.setMonth(pastMonthDate.getMonth() - 1);
-                              const pastMonthStr = pastMonthDate.toISOString().split('T')[0];
-                              const todayStrYmd = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`;
-
-                              return changes.filter(c => 
-                                c.teacherId === currentTeacher?.id &&
-                                c.status === 'approved' &&
-                                c.date >= pastMonthStr &&
-                                c.date <= todayStrYmd &&
-                                (c.requestType === 'sick_leave' || (c.requestType === 'substitute_teacher' && !c.targetTeacherId))
-                              ).map(c => {
-                                const [y, m, d] = c.date.split('-');
-                                const reqDateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
-                                const reqDayOfWeek = reqDateObj.getDay() === 0 ? 8 : reqDateObj.getDay() + 1;
-                                const origSched = schedules.find(s => s.teacherId === currentTeacher.id && s.dayOfWeek === reqDayOfWeek && getSessionCategory(s.session) === c.session && !s.isDeleted);
-                                const schoolName = origSched ? getSchoolName(origSched.schoolId, origSched) : '';
-                                const displayLabel = `${d}/${m}/${y} (${c.session === 'morning' ? 'Sáng' : 'Chiều'}) - ${schoolName || 'Lịch dạy'}`;
-                                return (
-                                  <option key={c.id} value={c.id}>{displayLabel}</option>
-                                );
-                              });
-                            })()}
+                            {getPastMissedSessions().map(item => (
+                              <option key={item.id} value={item.id}>{item.label}</option>
+                            ))}
                           </select>
                         </div>
                       )}
