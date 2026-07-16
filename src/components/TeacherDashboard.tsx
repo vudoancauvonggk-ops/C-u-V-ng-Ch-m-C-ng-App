@@ -248,7 +248,7 @@ export default function TeacherDashboard({
   const [artCount, setArtCount] = useState<number>(1);
   const [reqStatusMessage, setReqStatusMessage] = useState<string>('');
   const [substituteMode, setSubstituteMode] = useState<'regular' | 'past_leave'>('regular');
-  const [selectedPastLeaveId, setSelectedPastLeaveId] = useState('');
+  const [selectedPastLeaveIds, setSelectedPastLeaveIds] = useState<string[]>([]);
 
   // Alarms
   const [activeAlarms, setActiveAlarms] = useState<Record<string, number>>({});
@@ -908,7 +908,7 @@ export default function TeacherDashboard({
     setReqStatusMessage('Gửi đơn xin đổi ca thành công! Vui lòng chờ Giám đốc duyệt chốt.');
     setReqReason('');
     setSubstituteMode('regular');
-    setSelectedPastLeaveId('');
+    setSelectedPastLeaveIds([]);
     
     setTimeout(() => {
       setReqStatusMessage('');
@@ -1763,7 +1763,7 @@ export default function TeacherDashboard({
                       onChange={(e) => {
                         setReqType(e.target.value as any);
                         setSubstituteMode('regular');
-                        setSelectedPastLeaveId('');
+                        setSelectedPastLeaveIds([]);
                       }}
                     >
                       <option value="sick_leave">Nghỉ ốm / Việc bận cá nhân (Mất chuyên cần)</option>
@@ -1784,7 +1784,7 @@ export default function TeacherDashboard({
                             checked={substituteMode === 'regular'} 
                             onChange={() => {
                               setSubstituteMode('regular');
-                              setSelectedPastLeaveId('');
+                              setSelectedPastLeaveIds([]);
                               setReqReason('');
                             }}
                           />
@@ -1797,6 +1797,7 @@ export default function TeacherDashboard({
                             checked={substituteMode === 'past_leave'} 
                             onChange={() => {
                               setSubstituteMode('past_leave');
+                              setSelectedPastLeaveIds([]);
                               setReqReason('');
                             }}
                           />
@@ -1805,54 +1806,97 @@ export default function TeacherDashboard({
                       </div>
 
                       {substituteMode === 'past_leave' && (
-                        <div className="space-y-1">
-                          <label className="block text-[10px] font-bold text-slate-500">Chọn ca đã nghỉ trong tháng qua</label>
-                          <select
-                            className="w-full border-slate-200 rounded-xl p-2 bg-white text-xs text-slate-800"
-                            value={selectedPastLeaveId}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setSelectedPastLeaveId(val);
-                              if (val) {
-                                if (val.startsWith('leave_')) {
-                                  const id = val.replace('leave_', '');
-                                  const req = changes.find(c => c.id === id);
-                                  if (req) {
-                                    const [y, m, d] = req.date.split('-');
-                                    const reqDateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
-                                    const reqDayOfWeek = reqDateObj.getDay() === 0 ? 8 : reqDateObj.getDay() + 1;
-                                    const origSched = schedules.find(s => s.teacherId === currentTeacher.id && s.dayOfWeek === reqDayOfWeek && getSessionCategory(s.session) === req.session && !s.isDeleted);
-                                    
-                                    const schoolName = origSched ? getSchoolName(origSched.schoolId, origSched) : '';
-                                    const classNameStr = origSched ? getClassName(origSched.classId) : '';
-                                    const dateStrFormatted = `${d}/${m}/${y}`;
-                                    
-                                    setReqSession(req.session);
-                                    setReqReason(`[Dạy bù cho ca nghỉ ngày ${dateStrFormatted}] ${schoolName ? `Trường ${schoolName} - Lớp ${classNameStr}.` : ''} Lý do gốc: ${req.reason}`);
-                                  }
-                                } else if (val.startsWith('missed_')) {
-                                  const parts = val.split('_');
-                                  const schedId = parts[1];
-                                  const dateStr = parts.slice(2).join('_');
-                                  const sched = schedules.find(s => s.id === schedId);
-                                  if (sched) {
-                                    const [y, m, d] = dateStr.split('-');
-                                    const schoolName = getSchoolName(sched.schoolId, sched);
-                                    const classNameStr = getClassName(sched.classId);
-                                    setReqSession(getSessionCategory(sched.session));
-                                    setReqReason(`[Dạy bù cho ca vắng ngày ${d}/${m}/${y}] Trường ${schoolName} - Lớp ${classNameStr}. (Chưa điểm danh)`);
-                                  }
-                                }
-                              } else {
-                                setReqReason('');
-                              }
-                            }}
-                          >
-                            <option value="">-- Chọn ca đã nghỉ --</option>
-                            {getPastMissedSessions().map(item => (
-                              <option key={item.id} value={item.id}>{item.label}</option>
-                            ))}
-                          </select>
+                        <div className="space-y-2">
+                          <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                            Chọn các ca/lớp đã nghỉ trong tháng qua (Có thể chọn nhiều lớp cùng buổi)
+                          </label>
+                          <div className="max-h-[220px] overflow-y-auto border border-slate-200 rounded-xl bg-white p-3 space-y-2">
+                            {getPastMissedSessions().length === 0 ? (
+                              <p className="text-slate-400 italic text-[11px] text-center py-4">Không có ca vắng hoặc ca chưa điểm danh nào trong 30 ngày qua.</p>
+                            ) : (
+                              getPastMissedSessions().map(item => {
+                                const isChecked = selectedPastLeaveIds.includes(item.id);
+                                return (
+                                  <label key={item.id} className="flex items-start gap-2 p-2 rounded-lg hover:bg-slate-50 transition cursor-pointer border border-slate-100/50">
+                                    <input 
+                                      type="checkbox" 
+                                      className="mt-0.5 rounded text-blue-600 border-slate-350 focus:ring-blue-500 cursor-pointer"
+                                      checked={isChecked}
+                                      onChange={() => {
+                                        let updated: string[];
+                                        if (isChecked) {
+                                          updated = selectedPastLeaveIds.filter(id => id !== item.id);
+                                        } else {
+                                          updated = [...selectedPastLeaveIds, item.id];
+                                        }
+                                        setSelectedPastLeaveIds(updated);
+                                        
+                                        if (updated.length > 0) {
+                                          const selectedDetails = updated.map(id => {
+                                            if (id.startsWith('leave_')) {
+                                              const leaveId = id.replace('leave_', '');
+                                              const req = changes.find(c => c.id === leaveId);
+                                              if (req) {
+                                                const [y, m, d] = req.date.split('-');
+                                                const reqDateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+                                                const reqDayOfWeek = reqDateObj.getDay() === 0 ? 8 : reqDateObj.getDay() + 1;
+                                                const origSched = schedules.find(s => s.teacherId === currentTeacher.id && s.dayOfWeek === reqDayOfWeek && getSessionCategory(s.session) === req.session && !s.isDeleted);
+                                                
+                                                const schoolName = origSched ? getSchoolName(origSched.schoolId, origSched) : '';
+                                                const classNameStr = origSched ? getClassName(origSched.classId) : '';
+                                                return { date: `${d}/${m}/${y}`, session: req.session, schoolName, classNameStr, reason: req.reason };
+                                              }
+                                            } else if (id.startsWith('missed_')) {
+                                              const parts = id.split('_');
+                                              const schedId = parts[1];
+                                              const dateStr = parts.slice(2).join('_');
+                                              const sched = schedules.find(s => s.id === schedId);
+                                              if (sched) {
+                                                const [y, m, d] = dateStr.split('-');
+                                                const schoolName = getSchoolName(sched.schoolId, sched);
+                                                const classNameStr = getClassName(sched.classId);
+                                                return { date: `${d}/${m}/${y}`, session: getSessionCategory(sched.session), schoolName, classNameStr, reason: 'Chưa điểm danh' };
+                                              }
+                                            }
+                                            return null;
+                                          }).filter(Boolean);
+                                          
+                                          if (selectedDetails.length > 0) {
+                                            setReqSession(selectedDetails[0]!.session);
+                                            
+                                            const dates = Array.from(new Set(selectedDetails.map(d => d!.date)));
+                                            const schoolClassesMap: Record<string, string[]> = {};
+                                            selectedDetails.forEach(d => {
+                                              const key = d!.schoolName || 'Lớp dạy';
+                                              if (!schoolClassesMap[key]) schoolClassesMap[key] = [];
+                                              if (d!.classNameStr && !schoolClassesMap[key].includes(d!.classNameStr)) {
+                                                schoolClassesMap[key].push(d!.classNameStr);
+                                              }
+                                            });
+                                            
+                                            const detailsStr = Object.entries(schoolClassesMap).map(([school, classesList]) => {
+                                              return `Trường ${school}${classesList.length > 0 ? ` (Lớp ${classesList.join(', ')})` : ''}`;
+                                            }).join('; ');
+                                            
+                                            const datesStr = dates.join(', ');
+                                            setReqReason(`[Dạy bù cho ca vắng ngày ${datesStr}] ${detailsStr}.`);
+                                          }
+                                        } else {
+                                          setReqReason('');
+                                        }
+                                      }}
+                                    />
+                                    <div className="text-slate-800 text-[11px] leading-tight cursor-pointer">
+                                      <p className="font-semibold">{item.label}</p>
+                                      {item.reason && item.reason !== 'Không có dữ liệu điểm danh' && (
+                                        <p className="text-[10px] text-slate-500 italic mt-0.5">Lý do nghỉ: {item.reason}</p>
+                                      )}
+                                    </div>
+                                  </label>
+                                );
+                              })
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>
