@@ -247,6 +247,8 @@ export default function TeacherDashboard({
   const [reqReason, setReqReason] = useState<string>('');
   const [artCount, setArtCount] = useState<number>(1);
   const [reqStatusMessage, setReqStatusMessage] = useState<string>('');
+  const [substituteMode, setSubstituteMode] = useState<'regular' | 'past_leave'>('regular');
+  const [selectedPastLeaveId, setSelectedPastLeaveId] = useState('');
 
   // Alarms
   const [activeAlarms, setActiveAlarms] = useState<Record<string, number>>({});
@@ -830,6 +832,8 @@ export default function TeacherDashboard({
 
     setReqStatusMessage('Gửi đơn xin đổi ca thành công! Vui lòng chờ Giám đốc duyệt chốt.');
     setReqReason('');
+    setSubstituteMode('regular');
+    setSelectedPastLeaveId('');
     
     setTimeout(() => {
       setReqStatusMessage('');
@@ -1261,20 +1265,21 @@ export default function TeacherDashboard({
                              }).map(s => (
                                <option key={s.id} value={s.id}>{getSchoolName(s.schoolId, s)} - Lớp {getClassName(s.classId)}</option>
                              ))}
-                             {changes.filter(c => c.targetTeacherId === currentTeacher?.id && c.status === 'approved').flatMap(c => {
+                             {changes.filter(c => c.targetTeacherId === currentTeacher?.id && c.status === 'approved').map(c => {
                                const [y, m, d] = c.date.split('-');
                                const reqDateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
                                const reqDayOfWeek = reqDateObj.getDay() === 0 ? 8 : reqDateObj.getDay() + 1;
-                               let originalSchedules = schedules.filter(s => !s.isDeleted && s.teacherId === c.originalTeacherId && s.dayOfWeek === reqDayOfWeek && getSessionCategory(s.session) === c.session);
-                               if (originalSchedules.length === 0) {
-                                 originalSchedules = schedules.filter(s => !s.isDeleted && s.teacherId === c.originalTeacherId);
+                               let originalSchedule = schedules.find(s => !s.isDeleted && s.teacherId === c.originalTeacherId && s.dayOfWeek === reqDayOfWeek && getSessionCategory(s.session) === c.session);
+                               if (!originalSchedule) {
+                                 originalSchedule = schedules.find(s => !s.isDeleted && s.teacherId === c.originalTeacherId);
                                }
+                               if (!originalSchedule) return null;
                                const origTeacherName = teachers.find(t => t.id === c.originalTeacherId)?.name || c.originalTeacherId;
-                               return originalSchedules.map(os => (
-                                 <option key={`sub_${c.id}_${os.id}`} value={os.id}>
-                                   [Dạy Dùm] {getSchoolName(os.schoolId, os)} - Lớp {getClassName(os.classId)} ({c.date} - Thay cho {origTeacherName})
+                               return (
+                                 <option key={`sub_${c.id}`} value={originalSchedule.id}>
+                                   [Dạy Dùm] {getSchoolName(originalSchedule.schoolId, originalSchedule)} - Lớp {getClassName(originalSchedule.classId)} ({c.date} - Thay cho {origTeacherName})
                                  </option>
-                               ));
+                               );
                              })}
                           </select>
                         </div>
@@ -1680,7 +1685,11 @@ export default function TeacherDashboard({
                     <select 
                       className="w-full border-slate-200 rounded-xl p-2.5 text-xs bg-slate-50 font-medium text-slate-800"
                       value={reqType}
-                      onChange={(e) => setReqType(e.target.value as any)}
+                      onChange={(e) => {
+                        setReqType(e.target.value as any);
+                        setSubstituteMode('regular');
+                        setSelectedPastLeaveId('');
+                      }}
                     >
                       <option value="sick_leave">Nghỉ ốm / Việc bận cá nhân (Mất chuyên cần)</option>
                       <option value="swap_shift">Đổi ca dạy với Giáo viên khác</option>
@@ -1688,6 +1697,97 @@ export default function TeacherDashboard({
                       <option value="art_performance">Coi diễn văn nghệ (100k/trường, Giữ chuyên cần)</option>
                     </select>
                   </div>
+
+                  {reqType === 'substitute_teacher' && (
+                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/60 space-y-2.5">
+                      <label className="block text-[11px] font-bold text-slate-500">Lựa chọn kịch bản nhờ dạy thay *</label>
+                      <div className="flex gap-4">
+                        <label className="flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-slate-700">
+                          <input 
+                            type="radio" 
+                            name="substituteMode" 
+                            checked={substituteMode === 'regular'} 
+                            onChange={() => {
+                              setSubstituteMode('regular');
+                              setSelectedPastLeaveId('');
+                              setReqReason('');
+                            }}
+                          />
+                          Lịch bình thường hàng tuần
+                        </label>
+                        <label className="flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-slate-700">
+                          <input 
+                            type="radio" 
+                            name="substituteMode" 
+                            checked={substituteMode === 'past_leave'} 
+                            onChange={() => {
+                              setSubstituteMode('past_leave');
+                              setReqReason('');
+                            }}
+                          />
+                          Dạy bù cho ca đã nghỉ
+                        </label>
+                      </div>
+
+                      {substituteMode === 'past_leave' && (
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-bold text-slate-500">Chọn ca đã nghỉ trong tháng qua</label>
+                          <select
+                            className="w-full border-slate-200 rounded-xl p-2 bg-white text-xs text-slate-800"
+                            value={selectedPastLeaveId}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setSelectedPastLeaveId(val);
+                              if (val) {
+                                const req = changes.find(c => c.id === val);
+                                if (req) {
+                                  const [y, m, d] = req.date.split('-');
+                                  const reqDateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+                                  const reqDayOfWeek = reqDateObj.getDay() === 0 ? 8 : reqDateObj.getDay() + 1;
+                                  const origSched = schedules.find(s => s.teacherId === currentTeacher.id && s.dayOfWeek === reqDayOfWeek && getSessionCategory(s.session) === req.session && !s.isDeleted);
+                                  
+                                  const schoolName = origSched ? getSchoolName(origSched.schoolId, origSched) : '';
+                                  const classNameStr = origSched ? getClassName(origSched.classId) : '';
+                                  const dateStrFormatted = `${d}/${m}/${y}`;
+                                  
+                                  setReqSession(req.session);
+                                  setReqReason(`[Dạy bù cho ca nghỉ ngày ${dateStrFormatted}] ${schoolName ? `Trường ${schoolName} - Lớp ${classNameStr}.` : ''} Lý do gốc: ${req.reason}`);
+                                }
+                              } else {
+                                setReqReason('');
+                              }
+                            }}
+                          >
+                            <option value="">-- Chọn ca đã nghỉ --</option>
+                            {(() => {
+                              const pastMonthDate = new Date();
+                              pastMonthDate.setMonth(pastMonthDate.getMonth() - 1);
+                              const pastMonthStr = pastMonthDate.toISOString().split('T')[0];
+                              const todayStrYmd = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`;
+
+                              return changes.filter(c => 
+                                c.teacherId === currentTeacher?.id &&
+                                c.status === 'approved' &&
+                                c.date >= pastMonthStr &&
+                                c.date <= todayStrYmd &&
+                                (c.requestType === 'sick_leave' || (c.requestType === 'substitute_teacher' && !c.targetTeacherId))
+                              ).map(c => {
+                                const [y, m, d] = c.date.split('-');
+                                const reqDateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+                                const reqDayOfWeek = reqDateObj.getDay() === 0 ? 8 : reqDateObj.getDay() + 1;
+                                const origSched = schedules.find(s => s.teacherId === currentTeacher.id && s.dayOfWeek === reqDayOfWeek && getSessionCategory(s.session) === c.session && !s.isDeleted);
+                                const schoolName = origSched ? getSchoolName(origSched.schoolId, origSched) : '';
+                                const displayLabel = `${d}/${m}/${y} (${c.session === 'morning' ? 'Sáng' : 'Chiều'}) - ${schoolName || 'Lịch dạy'}`;
+                                return (
+                                  <option key={c.id} value={c.id}>{displayLabel}</option>
+                                );
+                              });
+                            })()}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <div>
                     <label className="block text-[11px] font-bold text-slate-500 mb-1">Ngày Áp Dụng *</label>
                     <input 
