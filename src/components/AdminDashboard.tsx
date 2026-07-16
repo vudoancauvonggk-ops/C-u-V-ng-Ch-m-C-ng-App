@@ -535,6 +535,7 @@ export default function AdminDashboard({
 
   const [quickBroadcastTitle, setQuickBroadcastTitle] = useState('');
   const [quickBroadcastMessage, setQuickBroadcastMessage] = useState('');
+  const [quickBroadcastTargetUserId, setQuickBroadcastTargetUserId] = useState('');
 
   const handleSendQuickBroadcast = async () => {
     if (!quickBroadcastMessage.trim()) {
@@ -542,9 +543,13 @@ export default function AdminDashboard({
       return;
     }
     
+    const targetText = quickBroadcastTargetUserId 
+      ? `tài khoản được chọn (${quickBroadcastTargetUserId})` 
+      : 'toàn bộ giáo viên';
+
     customConfirm(
       'Gửi thông báo nhanh',
-      'Bạn có chắc chắn muốn phát đi thông báo này tới toàn bộ giáo viên? Thông báo sẽ nổi ngay trên màn hình app của họ và tự động biến mất khi họ xem xong.',
+      `Bạn có chắc chắn muốn phát đi thông báo này tới ${targetText}? Thông báo sẽ nổi ngay trên màn hình app của họ và tự động biến mất khi họ xem xong.`,
       async () => {
         try {
           const res = await fetch('/api/notifications/quick-broadcast', {
@@ -552,19 +557,21 @@ export default function AdminDashboard({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               title: quickBroadcastTitle.trim() || 'Thông báo từ Ban Giám Đốc',
-              message: quickBroadcastMessage.trim()
+              message: quickBroadcastMessage.trim(),
+              targetUserId: quickBroadcastTargetUserId || null
             })
           });
           
           if (res.ok) {
-            customAlert('Thành công', 'Đã phát thông báo nhanh tới tất cả giáo viên!');
+            customAlert('Thành công', `Đã phát thông báo nhanh tới ${targetText}!`);
             setQuickBroadcastTitle('');
             setQuickBroadcastMessage('');
+            setQuickBroadcastTargetUserId('');
             
             onAddAuditLog(
               'Phát thông báo nhanh',
               currentUser?.username || 'Admin',
-              `Phát thông báo nhanh đến toàn bộ GV: "${quickBroadcastMessage.trim()}"`
+              `Phát thông báo nhanh đến ${targetText}: "${quickBroadcastMessage.trim()}"`
             );
           } else {
             const txt = await res.text();
@@ -2158,12 +2165,26 @@ export default function AdminDashboard({
                     <Megaphone className="h-6 w-6" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-base tracking-tight text-white">📢 Phát Thông Báo Nhanh Đến Tất Cả Giáo Viên</h3>
-                    <p className="text-xs text-slate-400">Thông báo này sẽ nổi ngay trên màn hình thiết bị của tất cả giáo viên và tự biến mất sau khi họ nhấn "Đã hiểu" (không lưu lại trong lịch sử).</p>
+                    <h3 className="font-bold text-base tracking-tight text-white">📢 Phát Thông Báo Nhanh Đến Giáo Viên</h3>
+                    <p className="text-xs text-slate-400">Thông báo này sẽ nổi ngay trên màn hình thiết bị của người nhận và tự biến mất sau khi họ nhấn "Đã hiểu".</p>
                   </div>
                 </div>
 
-                <div className="flex flex-col sm:flex-row gap-3">
+                <div className="flex flex-col md:flex-row gap-3">
+                  <select
+                    className="bg-slate-900 border border-slate-850 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer min-w-[200px]"
+                    value={quickBroadcastTargetUserId}
+                    onChange={(e) => setQuickBroadcastTargetUserId(e.target.value)}
+                  >
+                    <option value="">📢 Gửi toàn bộ giáo viên</option>
+                    {users.filter(u => !u.isDeleted && u.username !== 'admin').map(u => {
+                      const teacher = rawTeachers.find(t => t.id === u.teacherId);
+                      const displayLabel = teacher ? `${teacher.name} (${u.username})` : u.username;
+                      return (
+                        <option key={u.id} value={u.id} className="text-slate-800">{displayLabel}</option>
+                      );
+                    })}
+                  </select>
                   <input
                     type="text"
                     placeholder="Tiêu đề thông báo..."
@@ -2180,7 +2201,7 @@ export default function AdminDashboard({
                   />
                   <button
                     onClick={handleSendQuickBroadcast}
-                    className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-6 py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md shadow-indigo-600/10 active:scale-95"
+                    className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-6 py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md shadow-indigo-600/10 active:scale-95 shrink-0"
                   >
                     <Send className="h-4 w-4" />
                     <span>Gửi Ngay</span>

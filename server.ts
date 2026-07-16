@@ -41,7 +41,7 @@ async function startServer() {
   app.use(express.json({ limit: '200mb' }));
 
   let requestsToday = 0;
-  let latestQuickAnnouncement: { id: string; title: string; message: string; timestamp: string } | null = null;
+  let latestQuickAnnouncement: { id: string; title: string; message: string; targetUserId?: string | null; timestamp: string } | null = null;
   let errorsToday = 0;
 
   // Configure Web Push VAPID keys
@@ -799,16 +799,16 @@ async function startServer() {
 
   app.post('/api/notifications/quick-broadcast', (req, res) => {
     try {
-      const { title, message } = req.body;
+      const { title, message, targetUserId } = req.body;
       latestQuickAnnouncement = {
         id: `QA_${Date.now()}`,
         title: title || 'Thông báo từ Ban Giám Đốc',
         message: message || '',
+        targetUserId: targetUserId || null,
         timestamp: new Date().toISOString()
       };
       
-      // Send Web Push notification to all subscribers
-      sendPushNotification(null, {
+      sendPushNotification(targetUserId || null, {
         title: title || 'Thông báo từ Ban Giám Đốc',
         message: message || ''
       });

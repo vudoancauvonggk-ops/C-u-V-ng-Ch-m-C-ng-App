@@ -23,7 +23,7 @@ interface TeacherDashboardProps {
   onUpdateChanges: (changes: ChangeRequest[]) => Promise<void> | void;
   onAddAuditLog: (action: string, actor: string, details: string) => void;
   onAddNotification: (title: string, message: string, type: 'info' | 'warning' | 'alert' | 'success', targetTeacherId?: string) => void;
-  quickAnnouncement?: { id: string; title: string; message: string; timestamp: string } | null;
+  quickAnnouncement?: { id: string; title: string; message: string; targetUserId?: string | null; timestamp: string } | null;
   schoolCancellations: any[];
   onUpdateSchoolCancellations: (updated: any[]) => void;
 }
@@ -2568,7 +2568,11 @@ export default function TeacherDashboard({
           )}
 
           {/* Quick Broadcast Announcement Modal Overlay */}
-          {quickAnnouncement && quickAnnouncement.id !== lastReadQaId && (
+          {quickAnnouncement && quickAnnouncement.id !== lastReadQaId && 
+           (!quickAnnouncement.targetUserId || 
+            quickAnnouncement.targetUserId === currentTeacher?.id || 
+            quickAnnouncement.targetUserId === currentUser?.id || 
+            quickAnnouncement.targetUserId === currentUser?.teacherId) && (
             <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
               <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl border border-blue-50/50 animate-scaleIn relative">
                 <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-blue-500 via-pink-500 to-yellow-500"></div>

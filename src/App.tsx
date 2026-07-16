@@ -311,19 +311,37 @@ export default function App() {
             
             if (dbState && dbState.quickAnnouncement) {
               const qa = dbState.quickAnnouncement;
-              const lastNotifiedQaId = localStorage.getItem('last_notified_qa_id');
-              const readQaId = localStorage.getItem('read_qa_id');
               
-              if (lastNotifiedQaId !== qa.id && readQaId !== qa.id) {
-                if ('Notification' in window && Notification.permission === 'granted') {
-                  try {
-                    new Notification(qa.title, {
-                      body: qa.message,
-                      icon: '/logo_cauvong.jpg'
-                    });
-                    localStorage.setItem('last_notified_qa_id', qa.id);
-                  } catch (e) {
-                    console.warn('Failed to trigger native notification:', e);
+              let isTargeted = true;
+              if (qa.targetUserId) {
+                let myUserId = '';
+                let myTeacherId = '';
+                try {
+                  const cachedUserStr = localStorage.getItem('etms_current_user');
+                  if (cachedUserStr) {
+                    const cached = JSON.parse(cachedUserStr);
+                    myUserId = cached.id || '';
+                    myTeacherId = cached.teacherId || '';
+                  }
+                } catch {}
+                isTargeted = (qa.targetUserId === myUserId) || (qa.targetUserId === myTeacherId);
+              }
+
+              if (isTargeted) {
+                const lastNotifiedQaId = localStorage.getItem('last_notified_qa_id');
+                const readQaId = localStorage.getItem('read_qa_id');
+                
+                if (lastNotifiedQaId !== qa.id && readQaId !== qa.id) {
+                  if ('Notification' in window && Notification.permission === 'granted') {
+                    try {
+                      new Notification(qa.title, {
+                        body: qa.message,
+                        icon: '/logo_cauvong.jpg'
+                      });
+                      localStorage.setItem('last_notified_qa_id', qa.id);
+                    } catch (e) {
+                      console.warn('Failed to trigger native notification:', e);
+                    }
                   }
                 }
               }
