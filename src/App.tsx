@@ -201,6 +201,52 @@ export default function App() {
     }
   }, [currentUser]);
 
+  // Auto-subscribe to Web Push for all logged-in users (Admin, Staff, or Teachers)
+  useEffect(() => {
+    const urlBase64ToUint8Array = (base64String: string) => {
+      const padding = '='.repeat((4 - base64String.length % 4) % 4);
+      const base64 = (base64String + padding)
+        .replace(/-/g, '+')
+        .replace(/_/g, '/');
+      const rawData = window.atob(base64);
+      const outputArray = new Uint8Array(rawData.length);
+      for (let i = 0; i < rawData.length; ++i) {
+        outputArray[i] = rawData.charCodeAt(i);
+      }
+      return outputArray;
+    };
+
+    const autoRegisterPush = async () => {
+      if ('Notification' in window && Notification.permission === 'granted' && 'serviceWorker' in navigator && currentUser) {
+        try {
+          const reg = await navigator.serviceWorker.ready;
+          const subscribeOptions = {
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array('BP4ox6NYl1dug9LnF3Y2kjl23EE_ruRp3W03du42IFoIjSJa_x8SsFf8r7jb2ReVgkSWqKKkP9IRc3mGYqK4f5c')
+          };
+          let subscription = await reg.pushManager.getSubscription();
+          if (!subscription) {
+            subscription = await reg.pushManager.subscribe(subscribeOptions);
+          }
+          
+          const targetId = currentUser.teacherId || currentUser.id;
+          
+          await fetch('/api/notifications/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: targetId,
+              subscription
+            })
+          });
+        } catch (e) {
+          console.warn('Auto-registering push subscription failed in App:', e);
+        }
+      }
+    };
+    autoRegisterPush();
+  }, [currentUser]);
+
   // Startup useEffect: Fetch PostgreSQL state on initialization & poll for updates to keep frontend in perfect sync with the DB
   useEffect(() => {
     let currentServerVersion: string | null = null;
@@ -232,6 +278,35 @@ export default function App() {
                 }
                 return { ...u, permissions: parsed };
               });
+
+              try {
+                const cachedUserStr = localStorage.getItem('etms_current_user');
+                if (cachedUserStr) {
+                  const cachedUser = JSON.parse(cachedUserStr);
+                  const freshCurrentUser = dbState.users.find((u: any) => u.id === cachedUser.id);
+                  if (freshCurrentUser) {
+                    const hasChanged = JSON.stringify(freshCurrentUser) !== JSON.stringify(cachedUser);
+                    if (hasChanged) {
+                      setCurrentUser(freshCurrentUser);
+                      localStorage.setItem('etms_current_user', JSON.stringify(freshCurrentUser));
+                      
+                      // If roles or permissions change, we might want to also re-check admin access
+                      const checkAdminAccess = (user: AppUser | null) => {
+                        if (!user) return false;
+                        if (user.role !== 'member') return true;
+                        const rawPerms = typeof user.permissions === 'string' 
+                          ? (() => { try { return JSON.parse(user.permissions || '[]'); } catch { return []; } })() 
+                          : (user.permissions || []);
+                        const permsArray = Array.isArray(rawPerms) ? rawPerms : [];
+                        return permsArray.length > 0;
+                      };
+                      setViewMode(checkAdminAccess(freshCurrentUser) ? 'admin' : 'teacher');
+                    }
+                  }
+                }
+              } catch (e) {
+                console.error('Error syncing user profile in polling loop:', e);
+              }
             }
             
             if (dbState && dbState.quickAnnouncement) {
