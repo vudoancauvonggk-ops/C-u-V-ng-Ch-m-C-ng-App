@@ -451,10 +451,11 @@ export default function AdminDashboard({
     }
   };
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'schedules' | 'teachers' | 'schools' | 'attendance' | 'changes' | 'reports' | 'logs' | 'trash' | 'accounts' | 'meeting_attendance' | 'system_health'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'schedules' | 'teachers' | 'schools' | 'attendance' | 'changes' | 'reports' | 'logs' | 'trash' | 'accounts' | 'meeting_attendance' | 'system_health' | 'school_cancellations'>('dashboard');
   const [dashboardHistoryYear, setDashboardHistoryYear] = useState<string>('2026');
   const [dashboardHistoryMonth, setDashboardHistoryMonth] = useState<string>('06');
   const [trashCategory, setTrashCategory] = useState<'schedules' | 'teachers' | 'schools' | 'classes'>('schedules');
+  const [selectedCancellationSchool, setSelectedCancellationSchool] = useState<{ school: School, cancellations: any[] } | null>(null);
 
   // Fine-grained permission helper
   const getAvailableTeachersForDateSession = (dateStr: string, session: string, excludeTeacherId: string) => {
@@ -3829,30 +3830,80 @@ export default function AdminDashboard({
 
             {/* School level summarized analytics panel */}
             <div className="pt-6 border-t border-slate-150 space-y-4">
-              <h4 className="font-bold text-slate-800 text-sm">Báo cáo tóm lược chi phí thù lao theo Trường Đối Tác</h4>
+              <h4 className="font-bold text-slate-800 text-sm font-sans">Báo cáo tóm lược theo Trường Đối Tác</h4>
               
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {schools.map(sch => {
-                  const sLogs = attendance.filter(a => a.schoolId === sch.id && a.date.startsWith(reportMonth));
-                  const totalPeriods = sLogs.reduce((sum, curr) => sum + curr.periods, 0);
-                  const totalCost = sLogs.reduce((acc, curr) => {
-                    const t = teachers.find(teach => teach.id === curr.teacherId);
-                    return acc + (curr.periods * (t ? t.hourlyRate : 50000));
-                  }, 0);
+                {(() => {
+                  const [yearStr, monthStr] = reportMonth.split('-');
+                  const year = parseInt(yearStr, 10) || 2026;
+                  const month = (parseInt(monthStr, 10) || 7) - 1;
 
-                  return (
-                    <div key={sch.id} className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex items-center justify-between">
-                      <div className="space-y-1">
-                        <strong className="text-xs text-slate-600 block truncate max-w-40">{sch.name}</strong>
-                        <p className="text-lg font-extrabold text-slate-800 leading-none">{formatVND(totalCost)}</p>
-                        <p className="text-[10px] text-slate-400 font-mono font-bold">Tổng: {totalPeriods} tiết dạy hoàn thành</p>
+                  const dayOfWeekOccurrences: Record<number, number> = { 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0 };
+                  const numDays = new Date(year, month + 1, 0).getDate();
+                  for (let day = 1; day <= numDays; day++) {
+                    const d = new Date(year, month, day);
+                    const jsDay = d.getDay();
+                    const appDay = jsDay === 0 ? 8 : jsDay + 1;
+                    dayOfWeekOccurrences[appDay] = (dayOfWeekOccurrences[appDay] || 0) + 1;
+                  }
+
+                  return schools.map(sch => {
+                    const sLogs = attendance.filter(a => a.schoolId === sch.id && a.date.startsWith(reportMonth));
+                    const totalPeriods = sLogs.reduce((sum, curr) => sum + curr.periods, 0);
+                    
+                    const schoolClasses = classes.filter(c => c.schoolId === sch.id);
+                    const numClasses = schoolClasses.length;
+
+                    const monthCancellations = schoolCancellations.filter(c => c.schoolId === sch.id && c.date.startsWith(reportMonth));
+                    const numCancellations = monthCancellations.length;
+
+                    const classNotes = schoolClasses.map(cls => {
+                      const classSchedules = rawSchedules.filter(s => s.classId === cls.id && !s.isDeleted);
+                      const classSessions = classSchedules.reduce((sum, s) => sum + (dayOfWeekOccurrences[s.dayOfWeek] || 0), 0);
+                      return { name: cls.name, sessions: classSessions };
+                    });
+
+                    return (
+                      <div key={sch.id} className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex flex-col justify-between gap-3 shadow-sm hover:shadow transition">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="space-y-1 flex-1">
+                            <strong className="text-xs font-extrabold text-slate-800 block truncate max-w-44 font-sans">{sch.name}</strong>
+                            <div className="flex flex-wrap gap-1 items-center pt-0.5">
+                              <span className="text-[10px] text-blue-700 bg-blue-50 border border-blue-100 rounded px-1.5 py-0.5 font-bold inline-block">
+                                {numClasses} lớp hiện có
+                              </span>
+                              {numCancellations > 0 && (
+                                <button 
+                                  onClick={() => setSelectedCancellationSchool({ school: sch, cancellations: monthCancellations })}
+                                  className="text-[10px] text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-150 rounded px-1.5 py-0.5 font-bold inline-flex items-center gap-1 transition"
+                                >
+                                  🚫 {numCancellations} buổi nghỉ (Xem lý do)
+                                </button>
+                              )}
+                            </div>
+                            <p className="text-[10px] text-slate-500 font-mono font-bold pt-1">Thực tế dạy: {totalPeriods} tiết dạy hoàn thành</p>
+                          </div>
+                          <div className="p-2 bg-slate-200/60 rounded-lg text-slate-600 shrink-0">
+                            <Building className="h-4.5 w-4.5" />
+                          </div>
+                        </div>
+
+                        {/* Class expected sessions notes */}
+                        {classNotes.length > 0 && (
+                          <div className="text-[10px] text-slate-500 bg-slate-100/50 p-2 rounded-lg border border-slate-150/40 space-y-0.5">
+                            <div className="font-bold text-[8.5px] text-slate-400 uppercase tracking-wider font-mono">Dự kiến số buổi dạy:</div>
+                            {classNotes.map((note, idx) => (
+                              <div key={idx} className="flex justify-between items-center">
+                                <span className="font-semibold">{note.name}</span>
+                                <span className="font-mono font-bold text-slate-700">{note.sessions} buổi</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                      <div className="p-2.5 bg-slate-200/60 rounded-lg text-slate-600">
-                        <Building className="h-5 w-5" />
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  });
+                })()}
               </div>
             </div>
 
@@ -5207,6 +5258,63 @@ export default function AdminDashboard({
                 }`}
               >
                 {confirmState.confirmText || 'Xác nhận'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {selectedCancellationSchool && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-100 animate-fadeIn">
+          <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl border border-slate-100 animate-scaleUp">
+            <div className="p-6 space-y-4">
+              <div className="flex items-center justify-between border-b pb-3 border-slate-100">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-rose-500" />
+                  <h3 className="font-bold text-slate-800 text-sm font-sans">
+                    Chi tiết nghỉ - {selectedCancellationSchool.school.name}
+                  </h3>
+                </div>
+                <button 
+                  onClick={() => setSelectedCancellationSchool(null)}
+                  className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-50 transition"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              
+              <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
+                {selectedCancellationSchool.cancellations.map(c => {
+                  const teacher = teachers.find(t => t.id === c.teacherId);
+                  const classObj = classes.find(cl => cl.id === c.classId);
+                  return (
+                    <div key={c.id} className="p-3 bg-slate-50 rounded-xl border border-slate-150/60 text-[11px] space-y-1">
+                      <div className="flex justify-between items-center">
+                        <span className="font-bold text-slate-800 font-mono">{c.date} (Ca {c.session === 'morning' ? 'Sáng' : 'Chiều'})</span>
+                        <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${
+                          c.cancellationType === 'arrived' ? 'bg-orange-50 text-orange-700 border border-orange-100' : 'bg-slate-100 text-slate-600 border border-slate-200'
+                        }`}>
+                          {c.cancellationType === 'arrived' ? 'Tới trường mới báo' : 'Báo trước'}
+                        </span>
+                      </div>
+                      <div className="text-slate-500 font-sans">
+                        Giáo viên: <strong className="text-slate-700">{teacher ? teacher.name : c.teacherId}</strong> | Lớp: <strong className="text-slate-700">{classObj ? classObj.name : c.classId}</strong>
+                      </div>
+                      {c.reason && (
+                        <div className="mt-1.5 bg-white p-2 rounded border border-slate-100 italic text-slate-600">
+                          Ghi chú: {c.reason}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+              <button 
+                onClick={() => setSelectedCancellationSchool(null)}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition"
+              >
+                ĐÓNG
               </button>
             </div>
           </div>
