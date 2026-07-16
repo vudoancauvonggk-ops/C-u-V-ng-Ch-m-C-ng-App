@@ -2176,12 +2176,13 @@ export default function AdminDashboard({
                     value={quickBroadcastTargetUserId}
                     onChange={(e) => setQuickBroadcastTargetUserId(e.target.value)}
                   >
-                    <option value="">📢 Gửi toàn bộ giáo viên</option>
+                    <option value="" className="bg-slate-900 text-white">📢 Gửi toàn bộ giáo viên</option>
                     {users.filter(u => !u.isDeleted && u.username !== 'admin').map(u => {
                       const teacher = rawTeachers.find(t => t.id === u.teacherId);
                       const displayLabel = teacher ? `${teacher.name} (${u.username})` : u.username;
+                      const targetValue = u.teacherId || u.id;
                       return (
-                        <option key={u.id} value={u.id} className="text-slate-800">{displayLabel}</option>
+                        <option key={u.id} value={targetValue} className="bg-slate-900 text-white">{displayLabel}</option>
                       );
                     })}
                   </select>
