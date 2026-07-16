@@ -5531,11 +5531,35 @@ export default function AdminDashboard({
                   <select 
                     value={quickEditClassData.schoolId}
                     onChange={(e) => setQuickEditClassData({ ...quickEditClassData, schoolId: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none transition"
+                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none transition font-medium"
                   >
-                    {schools.map(s => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
+                    {(() => {
+                      const getSortName = (name: string) => {
+                        let n = name.trim().toLowerCase();
+                        const prefixes = [
+                          /^trường mầm non\s+/,
+                          /^trường mn\s+/,
+                          /^mầm non\s+/,
+                          /^trường\s+/,
+                          /^mn\s+/,
+                          /^lớp mẫu giáo\s+/,
+                          /^mẫu giáo\s+/
+                        ];
+                        for (const prefix of prefixes) {
+                          n = n.replace(prefix, '');
+                        }
+                        return n;
+                      };
+                      return [...schools]
+                        .sort((a, b) => {
+                          const nameA = getSortName(a.name);
+                          const nameB = getSortName(b.name);
+                          return nameA.localeCompare(nameB, 'vi', { sensitivity: 'base', numeric: true });
+                        })
+                        .map(s => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ));
+                    })()}
                   </select>
                 ) : (
                   <div className="space-y-2">
