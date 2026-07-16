@@ -3900,8 +3900,17 @@ export default function AdminDashboard({
                             </div>
                             <p className="text-[10px] text-slate-500 font-mono font-bold pt-1">Thực tế dạy: {totalPeriods} tiết dạy hoàn thành</p>
                           </div>
-                          <div className="p-2 bg-slate-200/60 rounded-lg text-slate-600 shrink-0">
-                            <Building className="h-4.5 w-4.5" />
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              onClick={() => handleDeleteSchool(sch.id, sch.name)}
+                              className="p-1 hover:bg-rose-50 rounded-lg text-slate-400 hover:text-rose-600 transition"
+                              title="Xóa trường đối tác"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                            <div className="p-1.5 bg-slate-200/60 rounded-lg text-slate-600">
+                              <Building className="h-4 w-4" />
+                            </div>
                           </div>
                         </div>
 
