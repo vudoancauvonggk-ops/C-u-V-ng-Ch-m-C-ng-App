@@ -1261,13 +1261,20 @@ export default function TeacherDashboard({
                              }).map(s => (
                                <option key={s.id} value={s.id}>{getSchoolName(s.schoolId, s)} - Lớp {getClassName(s.classId)}</option>
                              ))}
-                             {changes.filter(c => c.targetTeacherId === currentTeacher?.id && c.status === 'approved').map(c => {
+                             {changes.filter(c => c.targetTeacherId === currentTeacher?.id && c.status === 'approved').flatMap(c => {
                                const [y, m, d] = c.date.split('-');
                                const reqDateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
                                const reqDayOfWeek = reqDateObj.getDay() === 0 ? 8 : reqDateObj.getDay() + 1;
-                               const originalSchedule = schedules.find(s => s.teacherId === c.originalTeacherId && s.dayOfWeek === reqDayOfWeek && getSessionCategory(s.session) === c.session);
-                               if (!originalSchedule) return null;
-                               return <option key={`sub_${originalSchedule.id}`} value={originalSchedule.id}>[Dạy Dùm] {getSchoolName(originalSchedule.schoolId, originalSchedule)} - Lớp {getClassName(originalSchedule.classId)} ({c.date})</option>;
+                               let originalSchedules = schedules.filter(s => !s.isDeleted && s.teacherId === c.originalTeacherId && s.dayOfWeek === reqDayOfWeek && getSessionCategory(s.session) === c.session);
+                               if (originalSchedules.length === 0) {
+                                 originalSchedules = schedules.filter(s => !s.isDeleted && s.teacherId === c.originalTeacherId);
+                               }
+                               const origTeacherName = teachers.find(t => t.id === c.originalTeacherId)?.name || c.originalTeacherId;
+                               return originalSchedules.map(os => (
+                                 <option key={`sub_${c.id}_${os.id}`} value={os.id}>
+                                   [Dạy Dùm] {getSchoolName(os.schoolId, os)} - Lớp {getClassName(os.classId)} ({c.date} - Thay cho {origTeacherName})
+                                 </option>
+                               ));
                              })}
                           </select>
                         </div>
@@ -1782,8 +1789,15 @@ export default function TeacherDashboard({
                       const [y, m, d] = c.date.split('-');
                       const reqDateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
                       const reqDayOfWeek = reqDateObj.getDay() === 0 ? 8 : reqDateObj.getDay() + 1;
-                      const originalSchedules = schedules.filter(s => !s.isDeleted && s.teacherId === c.originalTeacherId && s.dayOfWeek === reqDayOfWeek && getSessionCategory(s.session) === c.session);
+                      let originalSchedules = schedules.filter(s => !s.isDeleted && s.teacherId === c.originalTeacherId && s.dayOfWeek === reqDayOfWeek && getSessionCategory(s.session) === c.session);
                       
+                      let isFallback = false;
+                      if (originalSchedules.length === 0) {
+                         // Fallback: list all active schedules of the original teacher
+                         originalSchedules = schedules.filter(s => !s.isDeleted && s.teacherId === c.originalTeacherId);
+                         isFallback = true;
+                      }
+
                       if (originalSchedules.length === 0) {
                          return (
                            <div key={c.id} className="p-4 bg-white rounded-2xl border border-slate-100 shadow-sm text-center">
@@ -1800,7 +1814,7 @@ export default function TeacherDashboard({
                           {originalSchedules.map(originalSchedule => {
                             const schSchool = schools.find(sch => sch.id === originalSchedule.schoolId);
                             const schClass = classes.find(cl => cl.id === originalSchedule.classId);
-                            const origTeacher = allowedTeachers.find(t => t.id === c.originalTeacherId) || { name: 'Giáo viên gốc' };
+                            const origTeacher = teachers.find(t => t.id === c.originalTeacherId) || { name: 'Giáo viên gốc' };
                             
                             return (
                               <div key={originalSchedule.id} className="p-4 bg-blue-50/50 rounded-2xl border border-blue-100 shadow-sm relative overflow-hidden">
@@ -1808,7 +1822,10 @@ export default function TeacherDashboard({
                                   {c.date} - Ca {c.session === 'morning' ? 'Sáng' : 'Chiều'}
                                 </div>
                                 
-                                <h4 className="font-bold text-blue-900 mt-2 mb-1">Dạy thay cho: {origTeacher.name}</h4>
+                                <h4 className="font-bold text-blue-900 mt-2 mb-1">
+                                  Dạy thay cho: {origTeacher.name} 
+                                  {isFallback && <span className="text-[9px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded font-normal italic ml-1">Lịch dạy bù/khác ngày</span>}
+                                </h4>
                                 <div className="space-y-1 mb-3 text-slate-700">
                                   <p><span className="font-semibold text-slate-500">Trường:</span> {schSchool?.name}</p>
                                   <p><span className="font-semibold text-slate-500">Lớp:</span> {schClass?.name}</p>
