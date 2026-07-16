@@ -463,6 +463,7 @@ export default function AdminDashboard({
   } | null>(null);
   const [newSchoolNameInline, setNewSchoolNameInline] = useState('');
   const [showCreateSchoolInline, setShowCreateSchoolInline] = useState(false);
+  const [schoolFilterText, setSchoolFilterText] = useState('');
 
   // Fine-grained permission helper
   const getAvailableTeachersForDateSession = (dateStr: string, session: string, excludeTeacherId: string) => {
@@ -3837,7 +3838,7 @@ export default function AdminDashboard({
             <div className="pt-6 border-t border-slate-150 space-y-4">
               <h4 className="font-bold text-slate-800 text-sm font-sans">Báo cáo tóm lược theo Trường Đối Tác</h4>
               
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="flex flex-col lg:flex-row gap-6 items-start">
                 {(() => {
                   const [yearStr, monthStr] = reportMonth.split('-');
                   const year = parseInt(yearStr, 10) || 2026;
@@ -3877,108 +3878,198 @@ export default function AdminDashboard({
                     });
                   }
 
-                  return activeSchools.map(sch => {
-                    const isOrphaned = sch.id === 'VIRTUAL_ORPHANED_SCHOOL';
-                    const sLogs = isOrphaned ? [] : attendance.filter(a => a.schoolId === sch.id && a.date.startsWith(reportMonth));
-                    const totalPeriods = sLogs.reduce((sum, curr) => sum + curr.periods, 0);
-                    const schoolClasses = isOrphaned ? orphanedClasses : classes.filter(c => c.schoolId === sch.id);
-                    const monthCancellations = isOrphaned ? [] : schoolCancellations.filter(c => c.schoolId === sch.id && c.date.startsWith(reportMonth));
-                    const numCancellations = monthCancellations.length;
+                  const getSortName = (name: string) => {
+                    let n = name.trim().toLowerCase();
+                    const prefixes = [
+                      /^trường mầm non\s+/,
+                      /^trường mn\s+/,
+                      /^mầm non\s+/,
+                      /^trường\s+/,
+                      /^mn\s+/,
+                      /^lớp mẫu giáo\s+/,
+                      /^mẫu giáo\s+/
+                    ];
+                    for (const prefix of prefixes) {
+                      n = n.replace(prefix, '');
+                    }
+                    return n;
+                  };
 
-                    // Group expected sessions by trimmed class name
-                    const classSessionsMap: Record<string, number> = {};
-                    schoolClasses.forEach(cls => {
-                      const classSchedules = rawSchedules.filter(s => s.classId === cls.id && !s.isDeleted);
-                      const classSessions = classSchedules.reduce((sum, s) => sum + (dayOfWeekOccurrences[s.dayOfWeek] || 0), 0);
-                      
-                      const trimmedName = cls.name.trim();
-                      if (classSessions > 0) {
-                        classSessionsMap[trimmedName] = (classSessionsMap[trimmedName] || 0) + classSessions;
-                      }
-                    });
+                  activeSchools.sort((a, b) => {
+                    if (a.id === 'VIRTUAL_ORPHANED_SCHOOL') return -1;
+                    if (b.id === 'VIRTUAL_ORPHANED_SCHOOL') return 1;
+                    
+                    const nameA = getSortName(a.name);
+                    const nameB = getSortName(b.name);
+                    return nameA.localeCompare(nameB, 'vi', { sensitivity: 'base', numeric: true });
+                  });
 
-                    const classNotes = Object.entries(classSessionsMap).map(([name, sessions]) => ({
-                      name,
-                      sessions
-                    }));
+                  const filteredSchools = activeSchools.filter(sch => 
+                    sch.name.toLowerCase().includes(schoolFilterText.toLowerCase())
+                  );
 
-                    const numClasses = classNotes.length;
-
-                    return (
-                      <div key={sch.id} className={`p-4 rounded-xl border flex flex-col justify-between gap-3 shadow-sm hover:shadow transition ${isOrphaned ? 'bg-amber-50/50 border-amber-200' : 'bg-slate-50 border-slate-100'}`}>
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="space-y-1 flex-1">
-                            <strong className="text-xs font-extrabold text-slate-800 block truncate max-w-44 font-sans">{sch.name}</strong>
-                            <div className="flex flex-wrap gap-1 items-center pt-0.5">
-                              <span className={`text-[10px] border rounded px-1.5 py-0.5 font-bold inline-block ${isOrphaned ? 'text-amber-700 bg-amber-50 border-amber-200' : 'text-blue-700 bg-blue-50 border-blue-100'}`}>
-                                {numClasses} lớp hiện có
-                              </span>
-                              {numCancellations > 0 && (
-                                <button 
-                                  onClick={() => setSelectedCancellationSchool({ school: sch, cancellations: monthCancellations })}
-                                  className="text-[10px] text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-150 rounded px-1.5 py-0.5 font-bold inline-flex items-center gap-1 transition"
-                                >
-                                  🚫 {numCancellations} buổi nghỉ (Xem lý do)
-                                </button>
-                              )}
-                            </div>
-                            {isOrphaned ? (
-                              <p className="text-[10px] text-amber-600 font-bold pt-1 leading-normal">
-                                Click 📝 để gán lớp vào trường học đúng
-                              </p>
-                            ) : (
-                              <p className="text-[10px] text-slate-500 font-mono font-bold pt-1">Thực tế dạy: {totalPeriods} tiết dạy hoàn thành</p>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            {!isOrphaned && (
-                              <button
-                                onClick={() => handleDeleteSchool(sch.id, sch.name)}
-                                className="p-1 hover:bg-rose-50 rounded-lg text-slate-400 hover:text-rose-600 transition"
-                                title="Xóa trường đối tác"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            )}
-                            <div className={`p-1.5 rounded-lg ${isOrphaned ? 'bg-amber-100 text-amber-700' : 'bg-slate-200/60 text-slate-600'}`}>
-                              <Building className="h-4 w-4" />
-                            </div>
-                          </div>
+                  return (
+                    <>
+                      {/* Left Sidebar School Selector */}
+                      <div className="w-full lg:w-64 shrink-0 bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm lg:sticky lg:top-24 space-y-3 max-h-[calc(100vh-140px)] overflow-hidden flex flex-col">
+                        <div className="font-bold text-slate-800 text-[10px] uppercase tracking-wider font-mono flex items-center justify-between border-b pb-2 border-slate-100 shrink-0">
+                          <span>Trường Học ({activeSchools.length})</span>
+                        </div>
+                        
+                        <div className="relative shrink-0">
+                          <input
+                            type="text"
+                            placeholder="Tìm nhanh..."
+                            value={schoolFilterText}
+                            onChange={(e) => setSchoolFilterText(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-800 focus:outline-none transition font-medium"
+                          />
+                          <Search className="w-3.5 h-3.5 text-slate-450 absolute left-2.5 top-1/2 -translate-y-1/2" />
                         </div>
 
-                        {/* Class expected sessions notes */}
-                        {classNotes.length > 0 && (
-                          <div className="text-[10px] text-slate-500 bg-slate-100/50 p-2 rounded-lg border border-slate-150/40 space-y-0.5">
-                            <div className="font-bold text-[8.5px] text-slate-400 uppercase tracking-wider font-mono">Dự kiến số buổi dạy:</div>
-                            {classNotes.map((note, idx) => (
-                              <div key={idx} className="flex justify-between items-center group/item hover:bg-slate-200/50 p-0.5 rounded transition">
-                                <div className="flex items-center gap-1.5 min-w-0">
-                                  <span className="font-semibold truncate">{note.name}</span>
-                                  <button
-                                    onClick={() => {
-                                      const matchingClasses = schoolClasses.filter(c => c.name.trim() === note.name);
-                                      setQuickEditClassData({
-                                        name: note.name,
-                                        schoolId: sch.id,
-                                        classesToUpdate: matchingClasses
-                                      });
-                                      setShowCreateSchoolInline(false);
-                                      setNewSchoolNameInline('');
-                                    }}
-                                    className="p-0.5 hover:bg-slate-250 rounded text-slate-400 hover:text-blue-600 transition shrink-0"
-                                    title="Sửa lớp / Chuyển trường"
-                                  >
-                                    <Edit2 className="w-2.5 h-2.5" />
-                                  </button>
-                                </div>
-                                <span className="font-mono font-bold text-slate-700 shrink-0">{note.sessions} buổi</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                        <div className="flex-1 overflow-y-auto space-y-0.5 pr-1 scrollbar-thin select-none">
+                          {activeSchools.map(sch => {
+                            const isOrphaned = sch.id === 'VIRTUAL_ORPHANED_SCHOOL';
+                            const matchesFilter = sch.name.toLowerCase().includes(schoolFilterText.toLowerCase());
+                            return (
+                              <button
+                                key={sch.id}
+                                onClick={() => {
+                                  const element = document.getElementById(`school-card-${sch.id}`);
+                                  if (element) {
+                                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    element.classList.add('ring-2', 'ring-blue-500', 'ring-offset-2');
+                                    setTimeout(() => {
+                                      element.classList.remove('ring-2', 'ring-blue-500', 'ring-offset-2');
+                                    }, 1500);
+                                  }
+                                }}
+                                className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition truncate block ${
+                                  !matchesFilter 
+                                    ? 'opacity-40 hover:opacity-100 hover:bg-slate-50' 
+                                    : isOrphaned 
+                                      ? 'text-amber-700 bg-amber-50 hover:bg-amber-100' 
+                                      : 'text-slate-655 hover:text-blue-600 hover:bg-slate-50'
+                                }`}
+                              >
+                                {isOrphaned ? '⚠️ Lớp chưa gán trường' : sch.name}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
-                    );
-                  });
+
+                      {/* Right Grid of Cards */}
+                      <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-6 w-full">
+                        {filteredSchools.map(sch => {
+                          const isOrphaned = sch.id === 'VIRTUAL_ORPHANED_SCHOOL';
+                          const sLogs = isOrphaned ? [] : attendance.filter(a => a.schoolId === sch.id && a.date.startsWith(reportMonth));
+                          const totalPeriods = sLogs.reduce((sum, curr) => sum + curr.periods, 0);
+                          const schoolClasses = isOrphaned ? orphanedClasses : classes.filter(c => c.schoolId === sch.id);
+                          const monthCancellations = isOrphaned ? [] : schoolCancellations.filter(c => c.schoolId === sch.id && c.date.startsWith(reportMonth));
+                          const numCancellations = monthCancellations.length;
+
+                          // Group expected sessions by trimmed class name
+                          const classSessionsMap: Record<string, number> = {};
+                          schoolClasses.forEach(cls => {
+                            const classSchedules = rawSchedules.filter(s => s.classId === cls.id && !s.isDeleted);
+                            const classSessions = classSchedules.reduce((sum, s) => sum + (dayOfWeekOccurrences[s.dayOfWeek] || 0), 0);
+                            
+                            const trimmedName = cls.name.trim();
+                            if (classSessions > 0) {
+                              classSessionsMap[trimmedName] = (classSessionsMap[trimmedName] || 0) + classSessions;
+                            }
+                          });
+
+                          const classNotes = Object.entries(classSessionsMap).map(([name, sessions]) => ({
+                            name,
+                            sessions
+                          }));
+
+                          const numClasses = classNotes.length;
+
+                          return (
+                            <div 
+                              key={sch.id} 
+                              id={`school-card-${sch.id}`}
+                              className={`p-4 rounded-xl border flex flex-col justify-between gap-3 shadow-sm hover:shadow transition-all duration-300 ${isOrphaned ? 'bg-amber-50/50 border-amber-200' : 'bg-slate-50 border-slate-100'}`}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="space-y-1 flex-1">
+                                  <strong className="text-xs font-extrabold text-slate-800 block truncate max-w-44 font-sans">{sch.name}</strong>
+                                  <div className="flex flex-wrap gap-1 items-center pt-0.5">
+                                    <span className={`text-[10px] border rounded px-1.5 py-0.5 font-bold inline-block ${isOrphaned ? 'text-amber-700 bg-amber-50 border-amber-200' : 'text-blue-700 bg-blue-50 border-blue-100'}`}>
+                                      {numClasses} lớp hiện có
+                                    </span>
+                                    {numCancellations > 0 && (
+                                      <button 
+                                        onClick={() => setSelectedCancellationSchool({ school: sch, cancellations: monthCancellations })}
+                                        className="text-[10px] text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-150 rounded px-1.5 py-0.5 font-bold inline-flex items-center gap-1 transition"
+                                      >
+                                        🚫 {numCancellations} buổi nghỉ (Xem lý do)
+                                      </button>
+                                    )}
+                                  </div>
+                                  {isOrphaned ? (
+                                    <p className="text-[10px] text-amber-600 font-bold pt-1 leading-normal">
+                                      Click 📝 để gán lớp vào trường học đúng
+                                    </p>
+                                  ) : (
+                                    <p className="text-[10px] text-slate-500 font-mono font-bold pt-1">Thực tế dạy: {totalPeriods} tiết dạy hoàn thành</p>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  {!isOrphaned && (
+                                    <button
+                                      onClick={() => handleDeleteSchool(sch.id, sch.name)}
+                                      className="p-1 hover:bg-rose-50 rounded-lg text-slate-400 hover:text-rose-600 transition"
+                                      title="Xóa trường đối tác"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </button>
+                                  )}
+                                  <div className={`p-1.5 rounded-lg ${isOrphaned ? 'bg-amber-100 text-amber-700' : 'bg-slate-200/60 text-slate-600'}`}>
+                                    <Building className="h-4 w-4" />
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Class expected sessions notes */}
+                              {classNotes.length > 0 && (
+                                <div className="text-[10px] text-slate-500 bg-slate-100/50 p-2 rounded-lg border border-slate-150/40 space-y-0.5">
+                                  <div className="font-bold text-[8.5px] text-slate-400 uppercase tracking-wider font-mono">Dự kiến số buổi dạy:</div>
+                                  {classNotes.map((note, idx) => (
+                                    <div key={idx} className="flex justify-between items-center group/item hover:bg-slate-200/50 p-0.5 rounded transition">
+                                      <div className="flex items-center gap-1.5 min-w-0">
+                                        <span className="font-semibold truncate">{note.name}</span>
+                                        <button
+                                          onClick={() => {
+                                            const matchingClasses = schoolClasses.filter(c => c.name.trim() === note.name);
+                                            setQuickEditClassData({
+                                              name: note.name,
+                                              schoolId: sch.id,
+                                              classesToUpdate: matchingClasses
+                                            });
+                                            setShowCreateSchoolInline(false);
+                                            setNewSchoolNameInline('');
+                                          }}
+                                          className="p-0.5 hover:bg-slate-250 rounded text-slate-400 hover:text-blue-600 transition shrink-0"
+                                          title="Sửa lớp / Chuyển trường"
+                                        >
+                                          <Edit2 className="w-2.5 h-2.5" />
+                                        </button>
+                                      </div>
+                                      <span className="font-mono font-bold text-slate-700 shrink-0">{note.sessions} buổi</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  );
                 })()}
               </div>
             </div>
