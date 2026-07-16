@@ -1285,12 +1285,10 @@ export default function AdminDashboard({
   const handleDeleteSchool = (id: string, name: string) => {
     customConfirm(
       'Xóa trường đối tác 🏫',
-      `Bạn có chắc chắn muốn xóa trường ${name} không?\nHành động này tự động gỡ bỏ trường và chuyển toàn bộ lớp học trực thuộc vào Thùng rác ẩn 30 ngày để đảm bảo an toàn.`,
+      `Bạn có chắc chắn muốn xóa trường ${name} không?\nHành động này tự động ẩn trường học khỏi danh sách. Các lớp học trực thuộc có lịch dạy sẽ được giữ lại và chuyển vào mục "Lớp chưa gán trường" để bạn dễ dàng hiệu chỉnh lại.`,
       () => {
         onUpdateSchools(rawSchools.map(s => s.id === id ? { ...s, isDeleted: true, deletedAt: new Date().toISOString() } : s));
-        // Soft delete associated classes
-        onUpdateClasses(rawClasses.map(c => c.schoolId === id ? { ...c, isDeleted: true, deletedAt: new Date().toISOString() } : c));
-        onAddAuditLog('Xóa trường học (Soft Delete)', 'Admin', `Đã gỡ bỏ trường ${name} và toàn bộ phân lớp liên quan vào Thùng rác ẩn 30 ngày.`);
+        onAddAuditLog('Xóa trường học (Soft Delete)', 'Admin', `Đã gỡ bỏ trường ${name}. Các lớp học trực thuộc được giữ lại để gán lại trường.`);
       }
     );
   };
@@ -3854,11 +3852,37 @@ export default function AdminDashboard({
                     dayOfWeekOccurrences[appDay] = (dayOfWeekOccurrences[appDay] || 0) + 1;
                   }
 
-                  return schools.map(sch => {
-                    const sLogs = attendance.filter(a => a.schoolId === sch.id && a.date.startsWith(reportMonth));
+                  const activeSchools = [...schools];
+                  
+                  const orphanedClasses = classes.filter(cls => {
+                    const hasValidSchool = schools.some(s => s.id === cls.schoolId);
+                    if (hasValidSchool) return false;
+                    
+                    const classSchedules = rawSchedules.filter(s => s.classId === cls.id && !s.isDeleted);
+                    const classSessions = classSchedules.reduce((sum, s) => sum + (dayOfWeekOccurrences[s.dayOfWeek] || 0), 0);
+                    return classSessions > 0;
+                  });
+
+                  if (orphanedClasses.length > 0) {
+                    activeSchools.push({
+                      id: 'VIRTUAL_ORPHANED_SCHOOL',
+                      name: '⚠️ Lớp chưa gán trường / cần sửa',
+                      address: '',
+                      lat: 10.8231,
+                      lng: 106.6297,
+                      contactPerson: '',
+                      phone: '',
+                      qrCodeData: '',
+                      isDeleted: false
+                    });
+                  }
+
+                  return activeSchools.map(sch => {
+                    const isOrphaned = sch.id === 'VIRTUAL_ORPHANED_SCHOOL';
+                    const sLogs = isOrphaned ? [] : attendance.filter(a => a.schoolId === sch.id && a.date.startsWith(reportMonth));
                     const totalPeriods = sLogs.reduce((sum, curr) => sum + curr.periods, 0);
-                    const schoolClasses = classes.filter(c => c.schoolId === sch.id);
-                    const monthCancellations = schoolCancellations.filter(c => c.schoolId === sch.id && c.date.startsWith(reportMonth));
+                    const schoolClasses = isOrphaned ? orphanedClasses : classes.filter(c => c.schoolId === sch.id);
+                    const monthCancellations = isOrphaned ? [] : schoolCancellations.filter(c => c.schoolId === sch.id && c.date.startsWith(reportMonth));
                     const numCancellations = monthCancellations.length;
 
                     // Group expected sessions by trimmed class name
@@ -3881,12 +3905,12 @@ export default function AdminDashboard({
                     const numClasses = classNotes.length;
 
                     return (
-                      <div key={sch.id} className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex flex-col justify-between gap-3 shadow-sm hover:shadow transition">
+                      <div key={sch.id} className={`p-4 rounded-xl border flex flex-col justify-between gap-3 shadow-sm hover:shadow transition ${isOrphaned ? 'bg-amber-50/50 border-amber-200' : 'bg-slate-50 border-slate-100'}`}>
                         <div className="flex items-start justify-between gap-2">
                           <div className="space-y-1 flex-1">
                             <strong className="text-xs font-extrabold text-slate-800 block truncate max-w-44 font-sans">{sch.name}</strong>
                             <div className="flex flex-wrap gap-1 items-center pt-0.5">
-                              <span className="text-[10px] text-blue-700 bg-blue-50 border border-blue-100 rounded px-1.5 py-0.5 font-bold inline-block">
+                              <span className={`text-[10px] border rounded px-1.5 py-0.5 font-bold inline-block ${isOrphaned ? 'text-amber-700 bg-amber-50 border-amber-200' : 'text-blue-700 bg-blue-50 border-blue-100'}`}>
                                 {numClasses} lớp hiện có
                               </span>
                               {numCancellations > 0 && (
@@ -3898,17 +3922,25 @@ export default function AdminDashboard({
                                 </button>
                               )}
                             </div>
-                            <p className="text-[10px] text-slate-500 font-mono font-bold pt-1">Thực tế dạy: {totalPeriods} tiết dạy hoàn thành</p>
+                            {isOrphaned ? (
+                              <p className="text-[10px] text-amber-600 font-bold pt-1 leading-normal">
+                                Click 📝 để gán lớp vào trường học đúng
+                              </p>
+                            ) : (
+                              <p className="text-[10px] text-slate-500 font-mono font-bold pt-1">Thực tế dạy: {totalPeriods} tiết dạy hoàn thành</p>
+                            )}
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
-                            <button
-                              onClick={() => handleDeleteSchool(sch.id, sch.name)}
-                              className="p-1 hover:bg-rose-50 rounded-lg text-slate-400 hover:text-rose-600 transition"
-                              title="Xóa trường đối tác"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                            <div className="p-1.5 bg-slate-200/60 rounded-lg text-slate-600">
+                            {!isOrphaned && (
+                              <button
+                                onClick={() => handleDeleteSchool(sch.id, sch.name)}
+                                className="p-1 hover:bg-rose-50 rounded-lg text-slate-400 hover:text-rose-600 transition"
+                                title="Xóa trường đối tác"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            )}
+                            <div className={`p-1.5 rounded-lg ${isOrphaned ? 'bg-amber-100 text-amber-700' : 'bg-slate-200/60 text-slate-600'}`}>
                               <Building className="h-4 w-4" />
                             </div>
                           </div>
