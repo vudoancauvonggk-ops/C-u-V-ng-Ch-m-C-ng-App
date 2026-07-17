@@ -814,7 +814,8 @@ export default function TeacherDashboard({
       c.status === 'approved' &&
       c.date >= pastMonthStr &&
       c.date <= todayStrYmd &&
-      (c.requestType === 'sick_leave' || (c.requestType === 'substitute_teacher' && !c.targetTeacherId))
+      (c.requestType === 'sick_leave' || c.requestType === 'substitute_teacher') &&
+      (!c.targetTeacherId || c.targetTeacherId === 'no_substitute')
     );
 
     approvedLeaves.forEach(c => {
@@ -1976,6 +1977,11 @@ export default function TeacherDashboard({
                                  c.requestType === 'art_performance' ? 'Coi diễn văn nghệ' : 'Nhờ người dạy thay'}
                               </span>
                               <span className="text-[10px] text-slate-500">{c.date} - {c.session === 'morning' ? 'Sáng' : 'Chiều'}</span>
+                              {(c.requestType === 'substitute_teacher' || c.requestType === 'sick_leave') && c.status === 'approved' && (
+                                <span className="text-[10px] block font-medium mt-0.5 text-indigo-700">
+                                  GV dạy thay: {c.targetTeacherId === 'no_substitute' ? 'Không có người dạy thay (Thiếu tiết)' : teachers.find(t => t.id === c.targetTeacherId)?.name || 'Không có người dạy thay'}
+                                </span>
+                              )}
                             </div>
                             <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-full ${
                               c.status === 'approved' ? 'bg-emerald-100 text-emerald-700' :

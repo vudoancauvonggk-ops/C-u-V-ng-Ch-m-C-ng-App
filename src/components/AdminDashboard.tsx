@@ -979,7 +979,10 @@ export default function AdminDashboard({
     return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(num);
   };
 
-  const getTeacherName = (id: string) => rawTeachers.find(t => t.id === id)?.name || id;
+  const getTeacherName = (id: string) => {
+    if (id === 'no_substitute') return 'Không có người dạy thay';
+    return rawTeachers.find(t => t.id === id)?.name || id;
+  };
   const getSchoolName = (id: string, s?: any) => {
     if (s && s.schoolName) return s.schoolName; // Prefer frozen custom name
     return rawSchools.find(sch => sch.id === id)?.name || id;
@@ -1767,7 +1770,7 @@ export default function AdminDashboard({
       // We no longer permanently modify the recurring weekly schedule for temporary shift changes.
       // The TeacherDashboard dynamically resolves substitute assignments using the `changes` array.
       
-      if (req.targetTeacherId) {
+      if (req.targetTeacherId && req.targetTeacherId !== 'no_substitute') {
          onAddNotification(
            'Phân công dạy dùm mới 📣', 
            `Bạn được Admin phân công dạy thay vào ngày ${req.date}, ca ${req.session === 'morning' ? 'Sáng' : 'Chiều'}. Vui lòng kiểm tra tab Dạy Dùm để xem chi tiết trường, lớp và đường đi.`, 
@@ -1783,7 +1786,7 @@ export default function AdminDashboard({
         'success',
         req.teacherId
       );
-      if (req.targetTeacherId) {
+      if (req.targetTeacherId && req.targetTeacherId !== 'no_substitute') {
         onAddNotification(
           'Đã duyệt việc thay ca của bạn',
           `Admin đã duyệt cho bạn thay ca dạy lớp thay cho giáo viên ${getTeacherName(req.originalTeacherId)} ngày ${req.date}.`,
@@ -3455,6 +3458,7 @@ export default function AdminDashboard({
                             className="bg-white border border-blue-200 text-blue-700 p-1 text-xs rounded outline-none"
                           >
                             <option value="">-- Xếp GV Dạy Thay --</option>
+                            <option value="no_substitute" className="bg-slate-900 text-white">Không có người dạy thay</option>
                             {getAvailableTeachersForDateSession(req.date, req.session, req.teacherId).map(t => (
                               <option key={t.id} value={t.id}>{t.name}</option>
                             ))}
