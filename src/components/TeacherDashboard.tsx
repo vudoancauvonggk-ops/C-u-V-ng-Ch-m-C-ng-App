@@ -1346,7 +1346,12 @@ export default function TeacherDashboard({
                                const reqDayOfWeek = reqDateObj.getDay() === 0 ? 8 : reqDateObj.getDay() + 1;
                                let originalSchedule = schedules.find(s => !s.isDeleted && s.teacherId === c.originalTeacherId && s.dayOfWeek === reqDayOfWeek && getSessionCategory(s.session) === c.session);
                                if (!originalSchedule) {
-                                 originalSchedule = schedules.find(s => !s.isDeleted && s.teacherId === c.originalTeacherId);
+                                  originalSchedule = schedules.find(s => {
+                                    if (s.isDeleted || s.teacherId !== c.originalTeacherId) return false;
+                                    const schoolName = getSchoolName(s.schoolId, s).toLowerCase();
+                                    const reasonLower = (c.reason || '').toLowerCase();
+                                    return reasonLower.includes(schoolName) || schoolName.includes(reasonLower);
+                                  }) || schedules.find(s => !s.isDeleted && s.teacherId === c.originalTeacherId);
                                }
                                if (!originalSchedule) return null;
                                const origTeacherName = teachers.find(t => t.id === c.originalTeacherId)?.name || c.originalTeacherId;
@@ -2007,7 +2012,15 @@ export default function TeacherDashboard({
                       let isFallback = false;
                       if (originalSchedules.length === 0) {
                          // Fallback: list all active schedules of the original teacher
-                         originalSchedules = schedules.filter(s => !s.isDeleted && s.teacherId === c.originalTeacherId);
+                          const reasonLower = (c.reason || '').toLowerCase();
+                          originalSchedules = schedules.filter(s => {
+                            if (s.isDeleted || s.teacherId !== c.originalTeacherId) return false;
+                            const schoolName = getSchoolName(s.schoolId, s).toLowerCase();
+                            return reasonLower.includes(schoolName) || schoolName.includes(reasonLower);
+                          });
+                          if (originalSchedules.length === 0) {
+                            originalSchedules = schedules.filter(s => !s.isDeleted && s.teacherId === c.originalTeacherId);
+                          }
                          isFallback = true;
                       }
 
