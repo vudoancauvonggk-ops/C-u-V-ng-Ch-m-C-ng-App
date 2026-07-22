@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Component } from 'react';
 import { 
   getStoredData, 
   saveStoredData, 
@@ -43,6 +43,54 @@ import {
 } from 'lucide-react';
 
 let syncQueue = Promise.resolve();
+
+// ============================================================
+// ERROR BOUNDARY - Bẫy bắt mọi lỗi React, tránh màn hình trắng
+// ============================================================
+interface ErrorBoundaryState { hasError: boolean; error: Error | null; }
+export class ErrorBoundary extends Component<{children: React.ReactNode}, ErrorBoundaryState> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error('[ErrorBoundary]', error, info);
+  }
+  handleReset = () => {
+    try { localStorage.removeItem('etms_current_user'); } catch {}
+    try { sessionStorage.clear(); } catch {}
+    window.location.href = '/';
+  };
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fef2f2', padding: '20px', fontFamily: 'sans-serif' }}>
+          <div style={{ background: 'white', borderRadius: '20px', padding: '32px', maxWidth: '500px', width: '100%', border: '2px solid #fca5a5', boxShadow: '0 20px 60px rgba(0,0,0,0.1)' }}>
+            <div style={{ fontSize: '48px', textAlign: 'center', marginBottom: '16px' }}>⚠️</div>
+            <h2 style={{ color: '#b91c1c', fontSize: '18px', fontWeight: 'bold', marginBottom: '8px', textAlign: 'center' }}>Ứng dụng gặp sự cố</h2>
+            <p style={{ color: '#64748b', fontSize: '14px', textAlign: 'center', marginBottom: '16px' }}>Đã xảy ra lỗi không mong muốn. Vui lòng bấm nút bên dưới để khởi động lại ứng dụng.</p>
+            <details style={{ marginBottom: '20px', background: '#fef2f2', borderRadius: '10px', padding: '12px', fontSize: '11px', color: '#991b1b' }}>
+              <summary style={{ cursor: 'pointer', fontWeight: 'bold' }}>Chi tiết lỗi kỹ thuật</summary>
+              <pre style={{ marginTop: '8px', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                {this.state.error?.message}{'\n'}{this.state.error?.stack}
+              </pre>
+            </details>
+            <button
+              onClick={this.handleReset}
+              style={{ width: '100%', padding: '14px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '15px', cursor: 'pointer' }}
+            >
+              🔄 Khởi động lại ứng dụng
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 export default function App() {
   // Global State initialized directly to clean empty arrays on startup to prevent auto-fetch freezes

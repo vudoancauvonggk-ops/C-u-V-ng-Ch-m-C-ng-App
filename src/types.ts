@@ -29,6 +29,9 @@ export interface School {
   qrCodeData: string; // QR code text verification
   isDeleted?: boolean;
   deletedAt?: string;
+  tuitionRate?: string;
+  isInvoice?: boolean;
+  classesCount?: number;
 }
 
 export interface ClassInfo {

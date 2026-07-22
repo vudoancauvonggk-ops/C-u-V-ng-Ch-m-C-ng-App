@@ -31,6 +31,9 @@ export const schools = pgTable('schools', {
   qrCodeData: text('qr_code_data').default(''),
   isDeleted: boolean('is_deleted').default(false).notNull(),
   deletedAt: text('deleted_at'),
+  tuitionRate: text('tuition_rate').default('').notNull(),
+  isInvoice: boolean('is_invoice').default(false).notNull(),
+  classesCount: doublePrecision('classes_count').default(0).notNull(),
 });
 
 export const classes = pgTable('classes', {

@@ -18,6 +18,24 @@
     <meta name="description" content="Ứng dụng quản lý lịch dạy giáo viên, điểm danh." />
   </head>
   <body>
+    <script>
+      window.onerror = function(msg, url, lineNo, columnNo, error) {
+        var root = document.getElementById('root');
+        if (root) {
+          root.innerHTML = '<div style="padding:20px;color:#b91c1c;background:#fef2f2;border:2px solid #f87171;margin:20px;border-radius:16px;font-family:sans-serif;">' +
+            '<h2 style="margin-top:0">⚠️ Phát hiện lỗi ứng dụng</h2>' +
+            '<p style="font-weight:bold">' + msg + '</p>' +
+            '<p style="font-size:12px;color:#666">' + url + ' (dòng ' + lineNo + ')</p>' +
+            '<pre style="white-space:pre-wrap;font-size:11px;background:#fff;padding:10px;border-radius:8px;max-height:200px;overflow:auto;">' + (error ? error.stack : '') + '</pre>' +
+            '<button onclick="localStorage.clear();sessionStorage.clear();location.href=\'/\'" style="padding:10px 20px;background:#ef4444;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;margin-top:10px;">Xóa bộ nhớ đệm & Khởi động lại</button>' +
+            '</div>';
+        }
+        return false;
+      };
+      window.onunhandledrejection = function(event) {
+        console.error('Unhandled rejection:', event.reason);
+      };
+    </script>
     <div id="root"></div>
     <script>
       // Automatically unregister old service workers to force update

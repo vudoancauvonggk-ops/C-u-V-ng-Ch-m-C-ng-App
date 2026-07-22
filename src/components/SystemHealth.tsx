@@ -20,7 +20,7 @@ export default function SystemHealth() {
 
   const [metrics, setMetrics] = useState({
     storageUsed: 27, // MB
-    storageTotal: 500, // MB
+    storageTotal: 5000, // 5 GB
     requestsToday: 0,
     errorsToday: 0,
     uptime: '0d 0h 0m',
@@ -104,7 +104,7 @@ export default function SystemHealth() {
         });
         setMetrics({
           storageUsed: data.dbSizeMb || 27,
-          storageTotal: 500,
+          storageTotal: data.dbMaxMb || 5000,
           requestsToday: data.requestsToday || 0,
           errorsToday: data.errorsToday || 0,
           uptime: data.uptime || '0d 0h 0m',

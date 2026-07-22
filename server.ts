@@ -58,7 +58,18 @@ async function startServer() {
       console.log(`[Push] Initiating push notification. Target: ${targetUserId || 'ALL'}, Payload:`, payload);
       let subs;
       if (targetUserId) {
-        subs = await db.select().from(pushSubscriptions).where(eq(pushSubscriptions.userId, targetUserId));
+        // Resolve teacherId to user ID(s)
+        const userRows = await db.select().from(users).where(eq(users.teacherId, targetUserId));
+        const userIds = userRows.map(u => u.id);
+        if (userIds.length > 0) {
+          subs = [];
+          for (const uid of userIds) {
+            const userSubs = await db.select().from(pushSubscriptions).where(eq(pushSubscriptions.userId, uid));
+            subs.push(...userSubs);
+          }
+        } else {
+          subs = await db.select().from(pushSubscriptions).where(eq(pushSubscriptions.userId, targetUserId));
+        }
       } else {
         subs = await db.select().from(pushSubscriptions);
       }
@@ -238,6 +249,7 @@ async function startServer() {
       environment,
       uptime: uptimeStr,
       dbSizeMb,
+      dbMaxMb: 5000,
       requestsToday,
       errorsToday,
       ramUsedMb,
@@ -1094,6 +1106,107 @@ async function startServer() {
     }
   });
 
+  // SECURE SCHOOL PAYROLL API FOR ADMIN
+  app.post('/api/admin/school-payroll', async (req, res) => {
+    try {
+      const { username, password } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ error: 'Thiếu thông tin đăng nhập xác thực!' });
+      }
+
+      // Verify admin credentials
+      const match = await db.select().from(users).where(eq(users.username, username)).limit(1);
+      if (match.length === 0 || match[0].password !== password || match[0].role !== 'admin' || match[0].isDeleted) {
+        return res.status(403).json({ error: 'Truy cập bị từ chối: Chỉ Admin mới có quyền xem thông tin này.' });
+      }
+
+      const fs = await import('fs');
+      const csvPath = 'D:\\Aerobic\\Bang Luong Cty nam 2016-2017-2018\\2026\\2026.csv';
+
+      if (!fs.existsSync(csvPath)) {
+        return res.json({ success: true, localFileExists: false, data: [] });
+      }
+
+      const fileContent = fs.readFileSync(csvPath, 'utf-8');
+      const lines = fileContent.split(/\r?\n/);
+      const parsedData: any[] = [];
+
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        
+        // Split on comma except when inside quotes
+        const cols = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+        if (cols.length < 3) continue;
+
+        const schoolName = cols[0].replace(/^"|"$/g, '').trim();
+        if (!schoolName) continue;
+
+        const classesCountStr = cols[1].replace(/^"|"$/g, '').trim();
+        const hourlyRateStr = cols[2].replace(/^"|"$/g, '').trim();
+        const totalFeeStr = cols[3] ? cols[3].replace(/^"|"$/g, '').trim() : '';
+        const notes = cols[4] ? cols[4].replace(/^"|"$/g, '').trim() : '';
+
+        parsedData.push({
+          schoolName,
+          classesCount: parseFloat(classesCountStr) || 0,
+          rawHourlyRate: hourlyRateStr,
+          totalFee: parseFloat(totalFeeStr) || 0,
+          notes
+        });
+      }
+
+      res.json({ success: true, localFileExists: true, data: parsedData });
+    } catch (err: any) {
+      console.error('Error reading school payroll file:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // SECURE API TO SAVE SCHOOL RATES & PAYROLL DETAILS
+  app.post('/api/admin/save-school-rates', async (req, res) => {
+    try {
+      const { username, password, schoolRates } = req.body;
+      if (!username) {
+        return res.status(400).json({ error: 'Thiếu thông tin đăng nhập xác thực!' });
+      }
+
+      // Verify admin credentials
+      const match = await db.select().from(users).where(eq(users.username, username)).limit(1);
+      if (match.length === 0 || match[0].role !== 'admin' || match[0].isDeleted) {
+        return res.status(403).json({ error: 'Truy cập bị từ chối: Chỉ Admin mới có quyền lưu thông tin này.' });
+      }
+      if (password && match[0].password !== password) {
+        return res.status(403).json({ error: 'Mật khẩu không đúng!' });
+      }
+
+      if (!Array.isArray(schoolRates)) {
+        return res.status(400).json({ error: 'Dữ liệu không đúng định dạng!' });
+      }
+
+      // Update schools in database
+      for (const rate of schoolRates) {
+        const { schoolId, tuitionRate, isInvoice, classesCount } = rate;
+        if (!schoolId) continue;
+        
+        await db.update(schools)
+          .set({
+            tuitionRate: tuitionRate || '',
+            isInvoice: !!isInvoice,
+            classesCount: parseFloat(classesCount) || 0
+          })
+          .where(eq(schools.id, schoolId));
+      }
+
+      // Fetch updated schools to return
+      const updatedSchools = await db.select().from(schools);
+      res.json({ success: true, schools: updatedSchools });
+    } catch (err: any) {
+      console.error('Error saving school rates:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // TEACHERS API
   app.get('/api/teachers', async (req, res) => {
     try {
@@ -1305,10 +1418,41 @@ async function startServer() {
         return res.status(400).json({ error: 'Missing sourceClassId or targetClassId' });
       }
 
-      await db.update(schedules).set({ classId: targetClassId }).where(eq(schedules.classId, sourceClassId));
+      // Fetch all schedules for both source and target classes
+      const sourceSchedulesList = await db.select().from(schedules).where(eq(schedules.classId, sourceClassId));
+      const targetSchedulesList = await db.select().from(schedules).where(eq(schedules.classId, targetClassId));
+
+      const activeSourceSchedules = sourceSchedulesList.filter(s => !s.isDeleted);
+      const activeTargetSchedules = targetSchedulesList.filter(s => !s.isDeleted);
+
+      for (const sc of activeSourceSchedules) {
+        const tc = activeTargetSchedules.find(t => 
+          t.dayOfWeek === sc.dayOfWeek && 
+          t.session === sc.session && 
+          t.teacherId === sc.teacherId && 
+          t.schoolId === sc.schoolId
+        );
+
+        if (tc) {
+          // Re-link attendance to target schedule and soft delete source schedule
+          await db.update(attendance).set({ scheduleId: tc.id, classId: targetClassId }).where(eq(attendance.scheduleId, sc.id));
+          await db.update(schedules).set({ 
+            isDeleted: true, 
+            deletedAt: new Date().toISOString() 
+          }).where(eq(schedules.id, sc.id));
+        } else {
+          // No duplicate. Just update classId to targetClassId
+          await db.update(schedules).set({ classId: targetClassId }).where(eq(schedules.id, sc.id));
+        }
+      }
+
+      // Also update any remaining attendance records
       await db.update(attendance).set({ classId: targetClassId }).where(eq(attendance.classId, sourceClassId));
+
+      // Update school cancellations
       await db.update(schoolCancellations).set({ classId: targetClassId }).where(eq(schoolCancellations.classId, sourceClassId));
 
+      // Delete source class
       await db.update(classes).set({ 
         isDeleted: true, 
         deletedAt: new Date().toISOString() 
@@ -1865,6 +2009,9 @@ async function startServer() {
     // Static assets will serve sw.js from distPath automatically
     
     app.get('*', (req, res) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

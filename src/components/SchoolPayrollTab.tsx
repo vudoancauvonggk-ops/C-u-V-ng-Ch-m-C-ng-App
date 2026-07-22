@@ -484,6 +484,8 @@ export default function SchoolPayrollTab({
       const schoolLogs = attendance.filter(a => {
         if ((a as any).isDeleted) return false;
         if (!a.date.startsWith(reportMonth)) return false;
+        // Chỉ đếm các tiết đã được duyệt hoặc xác thực để khớp với số tiết duyệt chấm công
+        if (!(a.confirmedByAdmin || a.isVerified)) return false;
         // Khớp trực tiếp schoolId
         if (a.schoolId === row.schoolId) return true;
         // Fallback: classId thuộc trường này
@@ -541,6 +543,75 @@ export default function SchoolPayrollTab({
 
   const totalPayrollValue = calculatedRows.reduce((acc, curr) => acc + curr.calculatedAmount, 0);
   const totalActualPeriods = calculatedRows.reduce((acc, curr) => acc + (curr.actualPeriods || 0), 0);
+
+  // Calculate schools with approved attendance logs that are missing from customRows
+  const getEffectiveSchoolId = (log: AttendanceLog): string => {
+    if (log.schoolId) return log.schoolId;
+    const cls = classes.find(c => c.id === log.classId && !c.isDeleted);
+    return cls?.schoolId || '';
+  };
+
+  const approvedLogs = attendance.filter(a => 
+    !(a as any).isDeleted && 
+    a.date.startsWith(reportMonth) && 
+    (a.confirmedByAdmin || a.isVerified)
+  );
+
+  const currentSchoolIds = customRows.map(r => r.schoolId).filter(Boolean);
+
+  const missingSchoolsMap = new Map<string, number>();
+  approvedLogs.forEach(log => {
+    const effSchoolId = getEffectiveSchoolId(log);
+    if (!effSchoolId) return;
+    if (!currentSchoolIds.includes(effSchoolId)) {
+      missingSchoolsMap.set(effSchoolId, (missingSchoolsMap.get(effSchoolId) || 0) + log.periods);
+    }
+  });
+
+  const missingSchoolsList = Array.from(missingSchoolsMap.entries()).map(([schoolId, periods]) => {
+    const sch = schools.find(s => s.id === schoolId);
+    return {
+      schoolId,
+      name: sch ? sch.name : `ID: ${schoolId}`,
+      periods,
+      sch
+    };
+  }).filter(item => item.sch && !item.sch.isDeleted).sort((a, b) => b.periods - a.periods);
+
+  const totalMissingPeriods = missingSchoolsList.reduce((sum, item) => sum + item.periods, 0);
+  const unlinkedRowsCount = customRows.filter(r => !r.schoolId).length;
+
+  const handleAddMissingSchool = (schoolId: string) => {
+    const sch = schools.find(s => s.id === schoolId);
+    if (!sch) return;
+    const newRow: PayrollRowState = {
+      rowId: `manual_${Date.now()}_${schoolId}`,
+      displayName: sch.name,
+      schoolId: sch.id,
+      classesCount: sch.classesCount || 1,
+      rawHourlyRate: sch.tuitionRate || '',
+      isInvoice: !!sch.isInvoice,
+      isCsvRow: false
+    };
+    setCustomRows(prev => [...prev, newRow]);
+  };
+
+  const handleAddAllMissingSchools = () => {
+    const newRows: PayrollRowState[] = [];
+    missingSchoolsList.forEach(item => {
+      if (!item.sch) return;
+      newRows.push({
+        rowId: `manual_${Date.now()}_${item.schoolId}_${Math.random()}`,
+        displayName: item.name,
+        schoolId: item.schoolId,
+        classesCount: item.sch.classesCount || 1,
+        rawHourlyRate: item.sch.tuitionRate || '',
+        isInvoice: !!item.sch.isInvoice,
+        isCsvRow: false
+      });
+    });
+    setCustomRows(prev => [...prev, ...newRows]);
+  };
 
   // Copy notification message
   const handleCopyMessage = (row: typeof calculatedRows[0]) => {
@@ -695,6 +766,45 @@ export default function SchoolPayrollTab({
         </div>
       </div>
 
+      {/* WARNING ALERTS */}
+      {missingSchoolsList.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-3xl p-5 shadow-sm space-y-3 animate-fadeIn">
+          <div className="flex items-start gap-3">
+            <div className="p-2 bg-amber-100 text-amber-600 rounded-2xl shrink-0 mt-0.5">
+              <AlertTriangle className="h-5 w-5" />
+            </div>
+            <div className="space-y-1">
+              <h4 className="font-bold text-amber-900 text-sm">Phát hiện lệch số tiết đã duyệt chấm công!</h4>
+              <p className="text-xs text-amber-700 leading-relaxed">
+                Hệ thống phát hiện có <strong>{totalMissingPeriods} tiết</strong> đã được duyệt chấm công trong <strong>Tháng {reportMonth.split('-')[1]}</strong> thuộc về <strong>{missingSchoolsList.length} trường</strong> nhưng các trường này chưa có trong bảng đối soát hiện tại. Điều này giải thích tại sao tổng số tiết đối soát bị lệch so với số tiết đã duyệt (ví dụ: hiển thị 618 thay vì 782).
+              </p>
+            </div>
+          </div>
+          
+          <div className="flex flex-wrap gap-2 pt-1 max-h-48 overflow-y-auto pr-2">
+            {missingSchoolsList.map(item => (
+              <div key={item.schoolId} className="flex items-center justify-between gap-3 bg-white border border-amber-100 px-3 py-1.5 rounded-2xl text-xs shadow-sm">
+                <span className="font-medium text-slate-800">{item.name} (<span className="text-amber-600 font-bold">{item.periods} tiết</span>)</span>
+                <button
+                  onClick={() => handleAddMissingSchool(item.schoolId)}
+                  className="bg-amber-100 hover:bg-amber-200 text-amber-800 font-bold px-2.5 py-1 rounded-xl text-[10px] transition cursor-pointer"
+                >
+                  + Thêm vào bảng
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex justify-end pt-1">
+            <button
+              onClick={handleAddAllMissingSchools}
+              className="bg-amber-600 hover:bg-amber-700 text-white font-bold px-4 py-2 rounded-2xl text-xs transition shadow-sm cursor-pointer"
+            >
+              Thêm tất cả {missingSchoolsList.length} trường thiếu vào đối soát (+{totalMissingPeriods} tiết)
+            </button>
+          </div>
+        </div>
+      )}
       {/* SUMMARY DASHBOARD CARDS */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="bg-gradient-to-tr from-blue-600 to-indigo-700 text-white rounded-3xl p-6 shadow-lg relative overflow-hidden">

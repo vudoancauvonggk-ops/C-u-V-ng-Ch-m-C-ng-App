@@ -11,6 +11,7 @@ import {
 import { Teacher, School, ClassInfo, Schedule, AttendanceLog, ChangeRequest, AuditLog, SystemNotification, AppUser, AppSettings, MeetingAttendance } from '../types';
 import SheetsSyncModal from './SheetsSyncModal';
 import SystemHealth from './SystemHealth';
+import SchoolPayrollTab from './SchoolPayrollTab';
 
 const AVAILABLE_PERMISSIONS = [
   { value: 'can_view_all_teachers', label: 'Xem hồ sơ & thù lao tất cả giáo viên' },
@@ -464,7 +465,7 @@ export default function AdminDashboard({
     }
   };
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'schedules' | 'teachers' | 'schools' | 'attendance' | 'changes' | 'reports' | 'logs' | 'trash' | 'accounts' | 'meeting_attendance' | 'system_health' | 'school_cancellations'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'schedules' | 'teachers' | 'schools' | 'attendance' | 'changes' | 'reports' | 'logs' | 'trash' | 'accounts' | 'meeting_attendance' | 'system_health' | 'school_cancellations' | 'school_payroll'>('dashboard');
   const [dashboardHistoryYear, setDashboardHistoryYear] = useState<string>('2026');
   const [dashboardHistoryMonth, setDashboardHistoryMonth] = useState<string>('06');
   const [trashCategory, setTrashCategory] = useState<'schedules' | 'teachers' | 'schools' | 'classes'>('schedules');
@@ -826,6 +827,71 @@ export default function AdminDashboard({
     isAlertOnly?: boolean;
     isLargeWarning?: boolean;
   } | null>(null);
+
+  // Manual attendance entry modal state
+  const [manualAttModal, setManualAttModal] = useState<{
+    teacherId: string;
+    scheduleIds: string[];
+    date: string;
+    session: string;
+    schoolId: string;
+    classIds: string[];
+  } | null>(null);
+  const [manualAttNote, setManualAttNote] = useState('');
+
+  const handleAddManualAttendance = () => {
+    if (!manualAttModal) return;
+    const newLogs = manualAttModal.scheduleIds.map((schedId, i) => {
+      const sched = schedules.find(s => s.id === schedId);
+      return {
+        id: `MANUAL_ADM_${Date.now()}_${i}`,
+        date: manualAttModal.date,
+        scheduleId: schedId,
+        teacherId: manualAttModal.teacherId,
+        schoolId: manualAttModal.schoolId,
+        classId: sched?.classId || manualAttModal.classIds[i] || '',
+        session: manualAttModal.session,
+        checkInTime: '08:00',
+        periods: sched?.periods || 1,
+        lat: 0,
+        lng: 0,
+        distanceMeter: 0,
+        selfieImage: '',
+        verificationMethod: 'ADMIN_MANUAL' as any,
+        isVerified: true,
+        isFlagged: false,
+        flagReason: manualAttNote ? `Nhập thủ công bởi Admin: ${manualAttNote}` : 'Nhập thủ công bởi Admin',
+        confirmedByAdmin: true,
+      };
+    });
+    onUpdateAttendance([...attendance, ...newLogs]);
+    const teacherName = rawTeachers.find(t => t.id === manualAttModal.teacherId)?.name || manualAttModal.teacherId;
+    const schoolName = getSchoolName(manualAttModal.schoolId);
+    onAddAuditLog('Nhập điểm danh thủ công', 'Admin', `Đã nhập ${newLogs.length} tiết cho ${teacherName} tại ${schoolName} ngày ${manualAttModal.date}`);
+    setManualAttModal(null);
+    setManualAttNote('');
+  };
+
+  const handleFixSchoolLinks = () => {
+    let count = 0;
+    const updated = attendance.map(a => {
+      if (!a.classId) return a;
+      const cls = classes.find(c => c.id === a.classId && !c.isDeleted);
+      if (cls && cls.schoolId && a.schoolId !== cls.schoolId) {
+        count++;
+        return { ...a, schoolId: cls.schoolId };
+      }
+      return a;
+    });
+
+    if (count > 0) {
+      onUpdateAttendance(updated);
+      onAddAuditLog('Sửa liên kết trường tự động', 'Admin', `Đã tự động vá ${count} bản ghi điểm danh bị lệch schoolId`);
+      customAlert('Thành công', `Đã tự động sửa thành công ${count} bản ghi điểm danh bị lệch mã trường! Bảng đối soát thu học phí trường đã được cập nhật chuẩn xác.`);
+    } else {
+      customAlert('Thông báo', 'Tất cả bản ghi điểm danh hiện tại đều đã khớp mã trường chuẩn với mã lớp!');
+    }
+  };
 
   const customConfirm = (
     title: string, 
@@ -1981,6 +2047,7 @@ export default function AdminDashboard({
           (currentUser?.role === 'admin' || hasPermission('can_manage_meeting_attendance') || !!currentUser?.teacherId) ? { id: 'meeting_attendance', label: 'Họp & Chuyên Môn', icon: CheckCircle2 } : null,
           (currentUser?.role === 'admin' || hasPermission('can_approve_changes') || !!currentUser?.teacherId) ? { id: 'changes', label: 'Thay Ca & Phép', icon: ArrowLeftRight, count: pendingChanges } : null,
           currentUser?.role === 'admin' ? { id: 'school_cancellations', label: 'Trường Nghỉ', icon: AlertTriangle } : null,
+          currentUser?.role === 'admin' ? { id: 'school_payroll', label: 'Đối Soát Các Trường', icon: FileSpreadsheet } : null,
           (currentUser?.role === 'admin' || hasPermission('can_view_reports') || !!currentUser?.teacherId) ? { id: 'reports', label: 'Bảng Lương & Chi Phí', icon: DollarSign } : null,
           (currentUser?.role === 'admin' || hasPermission('can_view_audit_logs')) ? { id: 'logs', label: 'Nhật Ký Audit', icon: FileText } : null,
           currentUser?.role === 'admin' ? { id: 'accounts', label: 'Cấp Quyền / Tài Khoản', icon: ShieldCheck } : null,
@@ -2535,6 +2602,19 @@ export default function AdminDashboard({
         {/* ----------------TAB 2: TEACHING SCHEDULES (CALENDAR BUILDER) ---------------- */}
         {activeTab === 'system_health' && <SystemHealth />}
 
+        {activeTab === 'school_payroll' && (
+          <SchoolPayrollTab
+            schools={rawSchools}
+            classes={rawClasses}
+            attendance={rawAttendance}
+            schedules={rawSchedules}
+            schoolCancellations={schoolCancellations}
+            currentUser={currentUser}
+            onAddAuditLog={onAddAuditLog}
+            onUpdateSchools={onUpdateSchools}
+          />
+        )}
+
         {activeTab === 'schedules' && (
           <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6 animate-fadeIn" id="schedules_tab">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
@@ -3024,6 +3104,14 @@ export default function AdminDashboard({
                     className="bg-transparent text-sm font-bold text-slate-800 outline-none cursor-pointer"
                   />
                 </div>
+
+                <button
+                  onClick={handleFixSchoolLinks}
+                  className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs px-3 py-1.5 rounded-lg border border-indigo-200 font-bold transition flex items-center gap-1 cursor-pointer"
+                  title="Tự động sửa các bản ghi điểm danh bị lệch mã trường so với mã lớp"
+                >
+                  <span>🔧</span> Vá liên kết trường
+                </button>
                 
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-slate-400 font-sans">Locals:</span>
@@ -3219,22 +3307,34 @@ export default function AdminDashboard({
                                                 )}
                                               </td>
                                               <td className="p-2 text-center pr-4">
-                                                {firstAtt && (
-                                                  <div className="flex items-center justify-center gap-2">
-                                                    {atts?.every((a:any) => a.confirmedByAdmin) ? (
-                                                      <span className="text-[9px] text-emerald-700 font-bold border border-emerald-200 bg-emerald-50 px-2 py-1 rounded-full">
-                                                        ĐÃ DUYỆT
-                                                      </span>
-                                                    ) : (
-                                                      <button 
-                                                        onClick={(e) => { e.stopPropagation(); handleApproveAttendance(atts!.map((a:any) => a.id)); }}
-                                                        className={`text-[9px] font-bold px-2 py-1.5 rounded text-white transition ${isFlagged ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}
-                                                      >
-                                                        Duyệt
-                                                      </button>
-                                                    )}
-                                                  </div>
-                                                )}
+                                                <div className="flex items-center justify-center gap-2">
+                                                  {!firstAtt ? (
+                                                    <button
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        const schIds = schs ? schs.map((s:any) => s.id) : [];
+                                                        const clsIds = schs ? schs.map((s:any) => s.classId) : [];
+                                                        const sId = schs ? schs[0].schoolId : '';
+                                                        const sess = schs ? schs[0].session : '';
+                                                        setManualAttModal({ teacherId: teacher.id, scheduleIds: schIds, date: attendanceDate, session: sess, schoolId: sId, classIds: clsIds });
+                                                      }}
+                                                      className="text-[9px] font-bold px-2 py-1.5 rounded text-white bg-purple-600 hover:bg-purple-700 transition"
+                                                    >
+                                                      + Nhập thủ công
+                                                    </button>
+                                                  ) : atts?.every((a:any) => a.confirmedByAdmin) ? (
+                                                    <span className="text-[9px] text-emerald-700 font-bold border border-emerald-200 bg-emerald-50 px-2 py-1 rounded-full">
+                                                      ĐÃ DUYỆT
+                                                    </span>
+                                                  ) : (
+                                                    <button 
+                                                      onClick={(e) => { e.stopPropagation(); handleApproveAttendance(atts!.map((a:any) => a.id)); }}
+                                                      className={`text-[9px] font-bold px-2 py-1.5 rounded text-white transition ${isFlagged ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}
+                                                    >
+                                                      Duyệt
+                                                    </button>
+                                                  )}
+                                                </div>
                                               </td>
                                             </tr>
                                           );
@@ -4028,6 +4128,27 @@ export default function AdminDashboard({
 
                           const numClasses = classNotes.length;
 
+                          // Compute teachers for this school
+                          const schoolSchedulesForTeachers = rawSchedules.filter(s => 
+                            (isOrphaned 
+                              ? schoolClasses.some(c => c.id === s.classId) 
+                              : s.schoolId === sch.id) 
+                            && !s.isDeleted
+                          );
+                          const teacherIds = Array.from(new Set(schoolSchedulesForTeachers.map(s => s.teacherId)));
+                          const teacherNames = teacherIds
+                            .map(id => rawTeachers.find(t => t.id === id)?.name || id)
+                            .filter(Boolean);
+
+                          const yogaClasses = classNotes.filter(c => c.name.toLowerCase().includes('yoga'));
+                          const aerobicClasses = classNotes.filter(c => !c.name.toLowerCase().includes('yoga'));
+                          const sortedClassNotes = [...aerobicClasses, ...yogaClasses];
+
+                          let classBadgeText = `${numClasses} lớp hiện có`;
+                          if (yogaClasses.length > 0 && aerobicClasses.length > 0) {
+                            classBadgeText = `${numClasses} lớp hiện có (${aerobicClasses.length} aerobic, ${yogaClasses.length} yoga)`;
+                          }
+
                           return (
                             <div 
                               key={sch.id} 
@@ -4037,9 +4158,14 @@ export default function AdminDashboard({
                               <div className="flex items-start justify-between gap-2">
                                 <div className="space-y-1 flex-1">
                                   <strong className="text-xs font-extrabold text-slate-800 block truncate max-w-44 font-sans">{sch.name}</strong>
+                                  {teacherNames.length > 0 && (
+                                    <div className="text-[9.5px] text-slate-500 font-bold font-sans truncate max-w-44" title={teacherNames.join(', ')}>
+                                      👩‍🏫 {teacherNames.join(', ')}
+                                    </div>
+                                  )}
                                   <div className="flex flex-wrap gap-1 items-center pt-0.5">
                                     <span className={`text-[10px] border rounded px-1.5 py-0.5 font-bold inline-block ${isOrphaned ? 'text-amber-700 bg-amber-50 border-amber-200' : 'text-blue-700 bg-blue-50 border-blue-100'}`}>
-                                      {numClasses} lớp hiện có
+                                      {classBadgeText}
                                     </span>
                                     {numCancellations > 0 && (
                                       <button 
@@ -4075,10 +4201,10 @@ export default function AdminDashboard({
                               </div>
 
                               {/* Class expected sessions notes */}
-                              {classNotes.length > 0 && (
+                              {sortedClassNotes.length > 0 && (
                                 <div className="text-[10px] text-slate-500 bg-slate-100/50 p-2 rounded-lg border border-slate-150/40 space-y-0.5">
                                   <div className="font-bold text-[8.5px] text-slate-400 uppercase tracking-wider font-mono">Dự kiến số buổi dạy:</div>
-                                  {classNotes.map((note, idx) => (
+                                  {sortedClassNotes.map((note, idx) => (
                                     <div key={idx} className="flex justify-between items-center group/item hover:bg-slate-200/50 p-0.5 rounded transition">
                                       <div className="flex items-center gap-1.5 min-w-0">
                                         <span className="font-semibold truncate">{note.name}</span>
@@ -5415,6 +5541,50 @@ export default function AdminDashboard({
       />
 
       {/* ------------------------------------------------------------- */}
+      {/* MANUAL ATTENDANCE ENTRY MODAL */}
+      {/* ------------------------------------------------------------- */}
+      {manualAttModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-100 animate-fadeIn">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-slate-100 space-y-4 animate-scaleUp">
+            <h4 className="font-bold text-slate-800 text-base flex items-center gap-2">
+              <span className="text-purple-600">✏️</span> Nhập Điểm Danh Thủ Công
+            </h4>
+            <div className="bg-purple-50 rounded-xl p-3 space-y-1 text-xs text-slate-700">
+              <p><b>Giáo viên:</b> {rawTeachers.find(t => t.id === manualAttModal.teacherId)?.name || manualAttModal.teacherId}</p>
+              <p><b>Trường:</b> {getSchoolName(manualAttModal.schoolId)}</p>
+              <p><b>Ngày:</b> {manualAttModal.date}</p>
+              <p><b>Ca:</b> {getSessionLabel(manualAttModal.session)}</p>
+              <p><b>Số lịch:</b> {manualAttModal.scheduleIds.length} ca ({manualAttModal.classIds.map(c => getClassName(c)).join(', ')})</p>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-600">Ghi chú lý do nhập thủ công:</label>
+              <input
+                type="text"
+                value={manualAttNote}
+                onChange={e => setManualAttNote(e.target.value)}
+                placeholder="VD: Giáo viên quên điểm danh, lỗi GPS..."
+                className="w-full text-sm p-2 border border-purple-200 rounded-lg bg-white outline-none focus:ring-2 focus:ring-purple-300"
+              />
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setManualAttModal(null); setManualAttNote(''); }}
+                className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-50 transition"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={handleAddManualAttendance}
+                className="flex-1 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-sm font-bold transition"
+              >
+                ✓ Xác nhận nhập
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
       {/* CUSTOM CONFIRM & ALERT MODAL */}
       {/* ------------------------------------------------------------- */}
       {confirmState && confirmState.isOpen && (
@@ -5680,15 +5850,56 @@ export default function AdminDashboard({
                           );
                           onUpdateClasses(updatedClasses);
 
-                          const updatedSchedules = rawSchedules.map(s => 
-                            deletedIds.includes(s.classId) ? { ...s, classId: targetMergeClassId } : s
-                          );
+                          // Deduplicate schedules client-side
+                          const updatedSchedules = [...rawSchedules];
+                          const scheduleIdMap: Record<string, string> = {};
+
+                          deletedIds.forEach(sourceClassId => {
+                            const sourceSchedules = updatedSchedules.filter(s => s.classId === sourceClassId && !s.isDeleted);
+                            sourceSchedules.forEach(sourceSched => {
+                              const targetSched = updatedSchedules.find(s => 
+                                s.classId === targetMergeClassId && 
+                                !s.isDeleted &&
+                                s.dayOfWeek === sourceSched.dayOfWeek &&
+                                s.session === sourceSched.session &&
+                                s.teacherId === sourceSched.teacherId &&
+                                s.schoolId === sourceSched.schoolId
+                              );
+
+                              if (targetSched) {
+                                const idx = updatedSchedules.findIndex(s => s.id === sourceSched.id);
+                                if (idx !== -1) {
+                                  updatedSchedules[idx] = { 
+                                    ...updatedSchedules[idx], 
+                                    isDeleted: true, 
+                                    deletedAt: new Date().toISOString() 
+                                  };
+                                }
+                                scheduleIdMap[sourceSched.id] = targetSched.id;
+                              } else {
+                                const idx = updatedSchedules.findIndex(s => s.id === sourceSched.id);
+                                if (idx !== -1) {
+                                  updatedSchedules[idx] = { 
+                                    ...updatedSchedules[idx], 
+                                    classId: targetMergeClassId 
+                                  };
+                                }
+                              }
+                            });
+                          });
                           onUpdateSchedules(updatedSchedules);
 
                           if (attendance && onUpdateAttendance) {
-                            const updatedAttendance = attendance.map(a => 
-                              deletedIds.includes(a.classId) ? { ...a, classId: targetMergeClassId } : a
-                            );
+                            const updatedAttendance = attendance.map(a => {
+                              let nextA = { ...a };
+                              if (deletedIds.includes(a.classId)) {
+                                nextA.classId = targetMergeClassId;
+                              }
+                              if (a.scheduleId && scheduleIdMap[a.scheduleId]) {
+                                nextA.scheduleId = scheduleIdMap[a.scheduleId];
+                              }
+                              return nextA;
+                            });
                             onUpdateAttendance(updatedAttendance);
                           }
 

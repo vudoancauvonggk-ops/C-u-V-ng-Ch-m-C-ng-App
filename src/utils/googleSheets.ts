@@ -1003,19 +1003,22 @@ export function parseSpecialScheduleSheet(rows: any[][], existingSchools?: Schoo
               let dynSchoolName = convertedLine.trim();
               let dynClassName = convertedLine.trim();
               
-              // Attempt to split Class - School format (e.g. "Lá vip1 - Tuổi Tiên")
               if (convertedLine.includes('-')) {
                 const parts = convertedLine.split('-');
                 if (parts.length >= 2) {
                   const part1 = parts.slice(0, -1).join('-').trim();
                   const part2 = parts[parts.length - 1].trim();
                   
-                  const classKeywords = /mầm|chồi|lá|nhà trẻ|lớp ghép|lớp nhóm|nhóm/i;
+                  const classKeywords = /mầm|chồi|lá|nhà trẻ|lớp ghép|lớp nhóm|nhóm|dino|dinosaur|lion|monkey|hippo|elephant|rainy|moon|kiwi|panda|rabbit|nemo|dolphin|hugo|piggold|kiwi|koala|parrot|nt|nhỏ|lớn|vip/i;
                   
                   if (classKeywords.test(part2) && !classKeywords.test(part1)) {
                     // It's likely "School - Class" format (e.g. Tuổi Tiên 2 - mầm 1)
                     dynClassName = part2;
                     dynSchoolName = part1;
+                  } else if (classKeywords.test(part2) && classKeywords.test(part1)) {
+                    // Both are class-related (e.g. "NT - Lion"), keep the entire text as the class name
+                    dynClassName = convertedLine.trim();
+                    dynSchoolName = tabSchool ? tabSchool.name : 'Trường chưa rõ';
                   } else {
                     // Default to "Class - School" format (e.g. Lá vip1 - Tuổi Tiên)
                     dynClassName = part1;

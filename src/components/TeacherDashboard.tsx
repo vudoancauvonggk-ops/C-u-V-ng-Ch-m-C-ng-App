@@ -119,8 +119,9 @@ export default function TeacherDashboard({
   }, [currentTeacher?.id, currentUser?.teacherId, canViewAllTeachers, mobileTab]);
 
   const [homeSubTab, setHomeSubTab] = useState<'overview' | 'history'>('overview');
-  const [historyYear, setHistoryYear] = useState<string>('2026');
-  const [historyMonth, setHistoryMonth] = useState<string>('06');
+  const nowForHistory = new Date();
+  const [historyYear, setHistoryYear] = useState<string>(String(nowForHistory.getFullYear()));
+  const [historyMonth, setHistoryMonth] = useState<string>(String(nowForHistory.getMonth() + 1).padStart(2, '0'));
   
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -692,11 +693,20 @@ export default function TeacherDashboard({
     let limitHour = isMorning ? 7 : 13;
     let limitMinute = 30;
     
-    // Parse actual start time if session contains it (e.g. "09:00" or "Sáng (09:00)")
-    const timeMatch = String(selectedSchedule.session).match(/(\d{1,2}):(\d{2})/);
+    // Parse actual start time (e.g. "09:00", "09h00", "9h", "9h30", "Chiều 15h10", "1h30")
+    const cleanSession = String(selectedSchedule.session).toLowerCase();
+    const timeMatch = cleanSession.match(/(\d{1,2})[:h](\d{2})?/) || cleanSession.match(/(\d{1,2})\s*h/);
     if (timeMatch) {
-      limitHour = parseInt(timeMatch[1], 10);
-      limitMinute = parseInt(timeMatch[2], 10);
+      let hour = parseInt(timeMatch[1], 10);
+      let minute = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
+      
+      // Convert 12-hour format afternoon times to 24-hour (e.g. 1h30 -> 13:30, 2h -> 14:00)
+      if (!isMorning && hour < 12) {
+        hour += 12;
+      }
+      
+      limitHour = hour;
+      limitMinute = minute;
     }
     
     const realNow = new Date();
@@ -964,7 +974,7 @@ export default function TeacherDashboard({
   const reportDate = new Date();
   const reportMonth = `${reportDate.getFullYear()}-${String(reportDate.getMonth() + 1).padStart(2, '0')}`;
   const reportMonthDisplay = `${String(reportDate.getMonth() + 1).padStart(2, '0')}/${reportDate.getFullYear()}`;
-  const thisMonthLogs = currentTeacher ? attendance.filter(a => !(a as any).isDeleted && a.teacherId === currentTeacher.id && a.date.startsWith(reportMonth) && (a.confirmedByAdmin || a.isVerified)) : [];
+  const thisMonthLogs = currentTeacher ? attendance.filter(a => !(a as any).isDeleted && a.teacherId === currentTeacher.id && a.date.startsWith(reportMonth) && (a.confirmedByAdmin || a.isVerified || !a.isFlagged)) : [];
   
   // Find substitute logs
   const approvedSubRequests = currentTeacher ? changes.filter(c => c.status === 'approved' && c.targetTeacherId === currentTeacher.id && c.date.startsWith(reportMonth)) : [];
@@ -2006,10 +2016,28 @@ export default function TeacherDashboard({
                 <p className="text-[11px] text-slate-500">Danh sách các ca bạn được phân công dạy thay. Nếu qua ngày, bạn cần làm đơn điểm danh bù.</p>
                 
                 <div className="space-y-4 mt-4">
-                  {changes.filter(c => c.targetTeacherId === currentTeacher.id && c.status === 'approved').length === 0 ? (
+                  {changes.filter(c => {
+                    if (c.targetTeacherId !== currentTeacher.id || c.status !== 'approved') return false;
+                    if (c.date < todayStr) {
+                      const createdTime = new Date(c.createdAt).getTime();
+                      if (!isNaN(createdTime) && (Date.now() - createdTime) >= 48 * 60 * 60 * 1000) {
+                        return false;
+                      }
+                    }
+                    return true;
+                  }).length === 0 ? (
                     <p className="text-center text-slate-400 py-4 italic text-[11px]">Chưa có lịch dạy dùm nào được phân công.</p>
                   ) : (
-                    changes.filter(c => c.targetTeacherId === currentTeacher.id && c.status === 'approved').map(c => {
+                    changes.filter(c => {
+                      if (c.targetTeacherId !== currentTeacher.id || c.status !== 'approved') return false;
+                      if (c.date < todayStr) {
+                        const createdTime = new Date(c.createdAt).getTime();
+                        if (!isNaN(createdTime) && (Date.now() - createdTime) >= 48 * 60 * 60 * 1000) {
+                          return false;
+                        }
+                      }
+                      return true;
+                    }).map(c => {
                       const [y, m, d] = c.date.split('-');
                       const reqDateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
                       const reqDayOfWeek = reqDateObj.getDay() === 0 ? 8 : reqDateObj.getDay() + 1;
@@ -2061,6 +2089,7 @@ export default function TeacherDashboard({
                                 <div className="space-y-1 mb-3 text-slate-700">
                                   <p><span className="font-semibold text-slate-500">Trường:</span> {schSchool?.name}</p>
                                   <p><span className="font-semibold text-slate-500">Lớp:</span> {schClass?.name}</p>
+                                  <p><span className="font-semibold text-slate-500">Giờ dạy:</span> {originalSchedule.session}</p>
                                   <p><span className="font-semibold text-slate-500">Địa chỉ:</span> {schSchool?.address}</p>
                                 </div>
 
