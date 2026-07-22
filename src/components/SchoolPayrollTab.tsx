@@ -540,7 +540,7 @@ export default function SchoolPayrollTab({
   );
 
   const totalPayrollValue = calculatedRows.reduce((acc, curr) => acc + curr.calculatedAmount, 0);
-const totalActualPeriods = calculatedRows.reduce((acc, curr) => acc + (curr.actualPeriods || 0), 0);
+  const totalActualPeriods = calculatedRows.reduce((acc, curr) => acc + (curr.actualPeriods || 0), 0);
 
   // Copy notification message
   const handleCopyMessage = (row: typeof calculatedRows[0]) => {
