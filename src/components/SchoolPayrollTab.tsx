@@ -3,7 +3,7 @@ import {
   Lock, Eye, EyeOff, Search, FileSpreadsheet, Copy, Check, AlertTriangle, 
   Sparkles, CheckCircle2, DollarSign, Calendar, Save, RefreshCw, Clock, Trash2, Plus, CopyPlus
 } from 'lucide-react';
-import { School, ClassInfo, AttendanceLog, Schedule } from '../types';
+import { School, ClassInfo, AttendanceLog, Schedule, Teacher } from '../types';
 
 interface SchoolPayrollTabProps {
   schools: School[];
@@ -14,6 +14,10 @@ interface SchoolPayrollTabProps {
   currentUser: any;
   onAddAuditLog: (action: string, actor: string, details: string) => void;
   onUpdateSchools: (schools: School[]) => void;
+  onUpdateClasses: (classes: ClassInfo[]) => void;
+  onUpdateSchedules: (schedules: Schedule[]) => void;
+  onUpdateAttendance: (attendance: AttendanceLog[]) => void;
+  teachers: Teacher[];
 }
 
 export interface PayrollRowState {
@@ -34,14 +38,28 @@ export default function SchoolPayrollTab({
   schoolCancellations,
   currentUser,
   onAddAuditLog,
-  onUpdateSchools
+  onUpdateSchools,
+  onUpdateClasses,
+  onUpdateSchedules,
+  onUpdateAttendance,
+  teachers
 }: SchoolPayrollTabProps) {
-  // Authentication & Verification
-  const [isAdminVerified, setIsAdminVerified] = useState(false);
-  const [adminPassword, setAdminPassword] = useState('');
+  // Authentication & Verification (cached in sessionStorage to prevent re-entering on tab switches)
+  const [isAdminVerified, setIsAdminVerified] = useState(() => {
+    return sessionStorage.getItem('etms_school_payroll_admin_verified') === 'true';
+  });
+  const [adminPassword, setAdminPassword] = useState(() => {
+    return sessionStorage.getItem('etms_school_payroll_admin_password') || '';
+  });
   const [showPassword, setShowPassword] = useState(false);
   const [verificationError, setVerificationError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
+
+  // Merge Schools State
+  const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
+  const [mergeSourceId, setMergeSourceId] = useState('');
+  const [mergeTargetId, setMergeTargetId] = useState('');
+  const [isMerging, setIsMerging] = useState(false);
 
   // Month selector
   const [reportMonth, setReportMonth] = useState(() => {
@@ -171,6 +189,8 @@ export default function SchoolPayrollTab({
       const result = await response.json();
       if (response.ok && result.success) {
         setIsAdminVerified(true);
+        sessionStorage.setItem('etms_school_payroll_admin_verified', 'true');
+        sessionStorage.setItem('etms_school_payroll_admin_password', adminPassword);
         onAddAuditLog('Truy cập bảng lương đối soát các trường phải thu', currentUser?.username || 'Admin', 'Thành công');
       } else {
         setVerificationError(result.error || 'Mật khẩu xác thực không đúng!');
@@ -179,6 +199,60 @@ export default function SchoolPayrollTab({
       setVerificationError('Lỗi kết nối máy chủ.');
     } finally {
       setIsVerifying(false);
+    }
+  };
+
+  // Perform backend school merging
+  const handleMergeSchools = async () => {
+    if (!mergeSourceId || !mergeTargetId) {
+      alert('Vui lòng chọn cả trường nguồn (sai tên) và trường đích (đúng tên)!');
+      return;
+    }
+    if (mergeSourceId === mergeTargetId) {
+      alert('Trường nguồn và trường đích không được giống nhau!');
+      return;
+    }
+
+    if (!window.confirm('Hành động này sẽ chuyển toàn bộ Lịch dạy, Lớp học và Chấm công từ trường nguồn sang trường đích, sau đó đánh dấu xóa trường nguồn khỏi hệ thống. Bạn có chắc chắn muốn thực hiện?')) {
+      return;
+    }
+
+    setIsMerging(true);
+    try {
+      const response = await fetch('/api/admin/merge-schools', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: currentUser?.username,
+          password: adminPassword,
+          sourceSchoolId: mergeSourceId,
+          targetSchoolId: mergeTargetId
+        })
+      });
+
+      const result = await response.json();
+      if (response.ok && result.success) {
+        onUpdateSchools(result.schools);
+        onUpdateClasses(result.classes);
+        onUpdateSchedules(result.schedules);
+        onUpdateAttendance(result.attendance);
+        onAddAuditLog(
+          'Hợp nhất trường học',
+          currentUser?.username || 'Admin',
+          `Hợp nhất từ ID: ${mergeSourceId} sang ID: ${mergeTargetId}`
+        );
+        alert('Hợp nhất trường học thành công!');
+        setIsMergeModalOpen(false);
+        setMergeSourceId('');
+        setMergeTargetId('');
+      } else {
+        alert(result.error || 'Có lỗi xảy ra khi hợp nhất trường.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Lỗi kết nối máy chủ khi thực hiện hợp nhất.');
+    } finally {
+      setIsMerging(false);
     }
   };
 
@@ -311,6 +385,16 @@ export default function SchoolPayrollTab({
 
     const missedPeriods = Math.max(0, expectedPeriods - actualPeriods);
 
+    // Resolve assigned teachers from schedules & approved attendance logs
+    const classSchedules = schedules.filter(s => schoolClassIds.has(s.classId) && !s.isDeleted);
+    const scheduleTeacherIds = classSchedules.map(s => s.teacherId);
+    const attendanceTeacherIds = schoolLogs.map(a => a.teacherId);
+    const uniqueTeacherIds = Array.from(new Set([...scheduleTeacherIds, ...attendanceTeacherIds]));
+    const assignedTeachers = uniqueTeacherIds
+      .map(tid => teachers.find(t => t.id === tid && !t.isDeleted)?.name)
+      .filter(Boolean);
+    const teachersStr = assignedTeachers.length > 0 ? assignedTeachers.join(', ') : 'Chưa phân công';
+
     return {
       rowId: sch.id,
       displayName: sch.name,
@@ -325,13 +409,15 @@ export default function SchoolPayrollTab({
       missedPeriods,
       calculatedAmount,
       formula,
+      teachersStr,
       dbSchool: sch
     };
   });
 
-  // Filtered rows for UI search
+  // Filtered rows for UI search (now searches both school name and teacher name)
   const filteredRows = calculatedRows.filter(row => 
-    row.displayName.toLowerCase().includes(searchTerm.toLowerCase())
+    row.displayName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    row.teachersStr.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   // Sorted alphabetically by displayName (A-Z)
@@ -426,6 +512,15 @@ export default function SchoolPayrollTab({
         </div>
 
         <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto justify-end">
+          {/* Merge Schools Button */}
+          <button
+            onClick={() => setIsMergeModalOpen(true)}
+            className="flex items-center gap-1.5 px-4 py-2 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 rounded-2xl text-xs font-bold transition cursor-pointer"
+          >
+            <CopyPlus className="h-4 w-4" />
+            <span>Hợp nhất trường</span>
+          </button>
+
           {/* Month Selector */}
           <div className="flex items-center gap-2 bg-slate-50 border border-slate-100 px-3 py-1.5 rounded-2xl w-full sm:w-auto">
             <Calendar className="h-4 w-4 text-slate-400" />
@@ -520,7 +615,7 @@ export default function SchoolPayrollTab({
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Tìm kiếm trường học..."
+              placeholder="Tìm kiếm trường học hoặc giáo viên..."
               className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 text-sm transition"
             />
           </div>
@@ -536,6 +631,7 @@ export default function SchoolPayrollTab({
             <thead>
               <tr className="bg-slate-50 border-b border-slate-150 text-slate-500 font-mono text-xs uppercase font-semibold">
                 <th className="p-4">Tên trường</th>
+                <th className="p-4">Giáo viên</th>
                 <th className="p-4 text-center">Số Lớp</th>
                 <th className="p-4 text-right">Đơn Giá</th>
                 <th className="p-4 text-center">Tiết Dạy / Tiết Phải Dạy</th>
@@ -546,7 +642,7 @@ export default function SchoolPayrollTab({
             <tbody className="divide-y divide-slate-100">
               {sortedRows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="p-8 text-center text-slate-400 font-medium font-sans">
+                  <td colSpan={7} className="p-8 text-center text-slate-400 font-medium font-sans">
                     Không tìm thấy trường nào có lịch dạy học hoặc phát sinh chấm công trong tháng này.
                   </td>
                 </tr>
@@ -566,6 +662,9 @@ export default function SchoolPayrollTab({
                           Lấy Hoá Đơn
                         </label>
                       </div>
+                    </td>
+                    <td className="p-4 text-slate-600 font-medium text-xs">
+                      {row.teachersStr}
                     </td>
                     <td className="p-4 text-center">
                       <input
@@ -639,6 +738,9 @@ export default function SchoolPayrollTab({
                 <td className="p-4 text-center">
                   <span className="text-slate-300 text-xs">—</span>
                 </td>
+                <td className="p-4 text-center">
+                  <span className="text-slate-300 text-xs">—</span>
+                </td>
                 <td className="p-4 text-right">
                   <span className="text-slate-300 text-xs">—</span>
                 </td>
@@ -662,6 +764,92 @@ export default function SchoolPayrollTab({
           </table>
         </div>
       </div>
+
+      {/* MERGE SCHOOLS MODAL */}
+      {isMergeModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn">
+          <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-slate-100 p-6 space-y-6 animate-scaleIn">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+                  <CopyPlus className="h-5 w-5" />
+                </div>
+                <h3 className="text-lg font-bold text-slate-900">Hợp nhất trường học</h3>
+              </div>
+              <button
+                onClick={() => {
+                  setIsMergeModalOpen(false);
+                  setMergeSourceId('');
+                  setMergeTargetId('');
+                }}
+                className="text-slate-400 hover:text-slate-650 font-bold text-lg select-none cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 text-xs text-amber-800 leading-relaxed">
+              <strong>Chú ý:</strong> Chức năng này dùng để gom các trường bị nhập sai tên hoặc bị trùng lặp lại làm một. Toàn bộ <strong>Lịch dạy</strong>, <strong>Lớp học</strong> và <strong>Chấm công</strong> của trường nguồn (sai tên) sẽ được chuyển hết sang trường đích (đúng tên). Sau đó, trường nguồn sẽ được xóa đi.
+            </div>
+
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-700">1. Chọn trường NGUỒN (Trường sai tên/Cần gộp đi):</label>
+                <select
+                  value={mergeSourceId}
+                  onChange={(e) => setMergeSourceId(e.target.value)}
+                  className="w-full text-xs border border-slate-200 rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-blue-550"
+                >
+                  <option value="">-- Chọn trường nguồn --</option>
+                  {[...schools]
+                    .filter(s => !s.isDeleted)
+                    .sort((a, b) => a.name.localeCompare(b.name, 'vi', { sensitivity: 'base' }))
+                    .map(s => (
+                      <option key={s.id} value={s.id}>{s.name} (ID: {s.id})</option>
+                    ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-700">2. Chọn trường ĐÍCH (Trường đúng tên/Cần gộp vào):</label>
+                <select
+                  value={mergeTargetId}
+                  onChange={(e) => setMergeTargetId(e.target.value)}
+                  className="w-full text-xs border border-slate-200 rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-blue-550"
+                >
+                  <option value="">-- Chọn trường đích --</option>
+                  {[...schools]
+                    .filter(s => !s.isDeleted && s.id !== mergeSourceId)
+                    .sort((a, b) => a.name.localeCompare(b.name, 'vi', { sensitivity: 'base' }))
+                    .map(s => (
+                      <option key={s.id} value={s.id}>{s.name} (ID: {s.id})</option>
+                    ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                onClick={() => {
+                  setIsMergeModalOpen(false);
+                  setMergeSourceId('');
+                  setMergeTargetId('');
+                }}
+                className="px-4 py-2 border border-slate-200 text-slate-600 rounded-xl text-xs font-semibold cursor-pointer hover:bg-slate-50 transition"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                onClick={handleMergeSchools}
+                disabled={isMerging || !mergeSourceId || !mergeTargetId}
+                className="flex items-center gap-1.5 px-5 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold cursor-pointer hover:bg-indigo-700 transition disabled:bg-indigo-400"
+              >
+                {isMerging ? 'Đang hợp nhất...' : 'Xác nhận hợp nhất'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

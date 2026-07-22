@@ -1287,7 +1287,7 @@ export default function App() {
           <div>
             <h1 className="text-sm font-bold tracking-tight text-white font-display flex items-center gap-1.5 leading-none">
               Education Teacher Management System
-              <span className="text-[9px] bg-emerald-500/20 text-emerald-400 font-mono px-1.5 py-0.2 rounded font-bold uppercase">v3.1.3</span>
+              <span className="text-[9px] bg-emerald-500/20 text-emerald-400 font-mono px-1.5 py-0.2 rounded font-bold uppercase">v3.1.4</span>
               <button 
                 onClick={() => {
                   const reloadWithCacheBust = () => {

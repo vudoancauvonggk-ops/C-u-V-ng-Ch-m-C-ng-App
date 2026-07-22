@@ -1207,6 +1207,65 @@ async function startServer() {
     }
   });
 
+  // SECURE API TO MERGE TWO SCHOOLS TOGETHER
+  app.post('/api/admin/merge-schools', async (req, res) => {
+    try {
+      const { username, password, sourceSchoolId, targetSchoolId } = req.body;
+      if (!username || !sourceSchoolId || !targetSchoolId) {
+        return res.status(400).json({ error: 'Thiếu thông tin bắt buộc!' });
+      }
+
+      // Verify admin credentials
+      const match = await db.select().from(users).where(eq(users.username, username)).limit(1);
+      if (match.length === 0 || match[0].role !== 'admin' || match[0].isDeleted) {
+        return res.status(403).json({ error: 'Truy cập bị từ chối: Chỉ Admin mới có quyền thực hiện chức năng này.' });
+      }
+      if (password && match[0].password !== password) {
+        return res.status(403).json({ error: 'Mật khẩu không đúng!' });
+      }
+
+      // 1. Update schedules: schoolId = targetSchoolId WHERE schoolId = sourceSchoolId
+      await db.update(schedules)
+        .set({ schoolId: targetSchoolId })
+        .where(eq(schedules.schoolId, sourceSchoolId));
+
+      // 2. Update classes: schoolId = targetSchoolId WHERE schoolId = sourceSchoolId
+      await db.update(classes)
+        .set({ schoolId: targetSchoolId })
+        .where(eq(classes.schoolId, sourceSchoolId));
+
+      // 3. Update attendance: schoolId = targetSchoolId WHERE schoolId = sourceSchoolId
+      await db.update(attendance)
+        .set({ schoolId: targetSchoolId })
+        .where(eq(attendance.schoolId, sourceSchoolId));
+
+      // 4. Mark source school as deleted
+      await db.update(schools)
+        .set({ 
+          isDeleted: true, 
+          deletedAt: new Date().toISOString() 
+        })
+        .where(eq(schools.id, sourceSchoolId));
+
+      // Fetch and return the updated lists to keep parent state in sync
+      const updatedSchools = await db.select().from(schools);
+      const updatedClasses = await db.select().from(classes);
+      const updatedSchedules = await db.select().from(schedules);
+      const updatedAttendance = await db.select().from(attendance);
+
+      res.json({ 
+        success: true, 
+        schools: updatedSchools, 
+        classes: updatedClasses, 
+        schedules: updatedSchedules,
+        attendance: updatedAttendance
+      });
+    } catch (err: any) {
+      console.error('Error merging schools:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // TEACHERS API
   app.get('/api/teachers', async (req, res) => {
     try {

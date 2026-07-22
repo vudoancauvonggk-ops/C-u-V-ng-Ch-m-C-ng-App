@@ -2612,6 +2612,10 @@ export default function AdminDashboard({
             currentUser={currentUser}
             onAddAuditLog={onAddAuditLog}
             onUpdateSchools={onUpdateSchools}
+            onUpdateClasses={onUpdateClasses}
+            onUpdateSchedules={onUpdateSchedules}
+            onUpdateAttendance={onUpdateAttendance}
+            teachers={rawTeachers}
           />
         )}
 
