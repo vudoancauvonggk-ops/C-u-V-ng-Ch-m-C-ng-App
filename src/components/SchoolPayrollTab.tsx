@@ -50,32 +50,17 @@ export default function SchoolPayrollTab({
     return `${now.getFullYear()}-${mm}`;
   });
 
-  // Array of payroll row items (managed reactively in state)
-  const [customRows, setCustomRows] = useState<PayrollRowState[]>([]);
-  const [csvUploaded, setCsvUploaded] = useState(false);
+  // Local edits state to track unsaved edits inline before DB update completes
+  const [edits, setEdits] = useState<Record<string, { tuitionRate?: string; isInvoice?: boolean; classesCount?: number }>>({});
 
   const [searchTerm, setSearchTerm] = useState('');
   const [copiedSchoolId, setCopiedSchoolId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error' | null>(null);
 
-  // Auto-save function to persist changes silently to DB
-  const autoSaveToDb = async (rowsToSave: PayrollRowState[]) => {
+  // Directly save a school's rate, invoice status, and class count to the DB
+  const handleSaveSchoolRate = async (schoolId: string, tuitionRate: string, isInvoice: boolean, classesCount: number) => {
     if (!currentUser?.username) return;
-    const schoolRatesToSave: any[] = [];
-
-    rowsToSave.forEach(r => {
-      if (!r.schoolId) return;
-      schoolRatesToSave.push({
-        schoolId: r.schoolId,
-        tuitionRate: r.rawHourlyRate,
-        isInvoice: r.isInvoice,
-        classesCount: r.classesCount
-      });
-    });
-
-    if (schoolRatesToSave.length === 0) return;
-
     setSaveStatus('saving');
     try {
       const response = await fetch('/api/admin/save-school-rates', {
@@ -84,7 +69,12 @@ export default function SchoolPayrollTab({
         body: JSON.stringify({
           username: currentUser?.username,
           password: adminPassword,
-          schoolRates: schoolRatesToSave
+          schoolRates: [{
+            schoolId,
+            tuitionRate,
+            isInvoice,
+            classesCount
+          }]
         })
       });
 
@@ -96,92 +86,39 @@ export default function SchoolPayrollTab({
         setSaveStatus('error');
       }
     } catch (err) {
-      console.error('Auto-save error:', err);
+      console.error('Save error:', err);
       setSaveStatus('error');
     }
   };
 
-  // Clean name for intelligent matching
-  const cleanSchoolName = (name: string): string => {
-    return name.toLowerCase()
-      .replace(/trường/g, '')
-      .replace(/mầm non/g, '')
-      .replace(/mn/g, '')
-      .replace(/tiểu học/g, '')
-      .replace(/cs\d+/g, '')
-      .replace(/cs \d+/g, '')
-      .replace(/yoga/g, '')
-      .replace(/[^a-z0-9]/g, '')
-      .trim();
-  };
-
-  // Fuzzy match CSV name with DB school
-  const getFuzzyMatchedSchoolId = (csvName: string): string => {
-    const cleanCsv = cleanSchoolName(csvName);
-    if (!cleanCsv) return '';
-    
-    let match = schools.find(s => !s.isDeleted && cleanSchoolName(s.name) === cleanCsv);
-    if (match) return match.id;
-
-    match = schools.find(s => {
-      if (s.isDeleted) return false;
-      const cleanDb = cleanSchoolName(s.name);
-      return cleanDb.includes(cleanCsv) || cleanCsv.includes(cleanDb);
-    });
-
-    return match ? match.id : '';
-  };
-
-  // Initialize customRows on mount (from localStorage OR from DB schools)
-  useEffect(() => {
-    try {
-      const savedRows = localStorage.getItem('etms_school_payroll_rows_v3');
-      if (savedRows) {
-        const parsed = JSON.parse(savedRows);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setCustomRows(parsed);
-          setCsvUploaded(true);
-          return;
-        }
+  // Helper to handle inline field updates and trigger auto-save
+  const updateSchoolField = (schoolId: string, field: 'tuitionRate' | 'isInvoice' | 'classesCount', value: any) => {
+    // 1. Update local edits state for immediate UI feedback
+    setEdits(prev => ({
+      ...prev,
+      [schoolId]: {
+        ...prev[schoolId],
+        [field]: value
       }
-    } catch (e) {
-      console.error('Error loading payroll rows from localStorage:', e);
-    }
+    }));
 
-    // Fallback: populate from DB schools if customRows is empty
-    if (schools && schools.length > 0 && customRows.length === 0) {
-      const dbRows: PayrollRowState[] = schools
-        .filter(s => !s.isDeleted && s.tuitionRate)
-        .map(s => ({
-          rowId: `db_${s.id}`,
-          displayName: s.name,
-          schoolId: s.id,
-          classesCount: s.classesCount || 0,
-          rawHourlyRate: s.tuitionRate || '',
-          isInvoice: !!s.isInvoice,
-          isCsvRow: false
-        }));
-      setCustomRows(dbRows);
-    }
-  }, [schools]);
+    // 2. Fetch the target school to get current database values
+    const targetSchool = schools.find(s => s.id === schoolId);
+    if (!targetSchool) return;
 
-  // Save customRows to localStorage & DB automatically whenever they change
-  useEffect(() => {
-    try {
-      if (customRows.length > 0) {
-        localStorage.setItem('etms_school_payroll_rows_v3', JSON.stringify(customRows));
-      }
-    } catch (e) {
-      console.error('Error saving payroll rows to localStorage:', e);
-    }
+    const schoolClasses = classes.filter(c => c.schoolId === schoolId && !c.isDeleted);
+    const dbClassesCount = targetSchool.classesCount || schoolClasses.length || 1;
 
-    if (customRows.length > 0 && isAdminVerified) {
-      const timer = setTimeout(() => {
-        autoSaveToDb(customRows);
-      }, 800);
-      return () => clearTimeout(timer);
-    }
-  }, [customRows, isAdminVerified]);
+    const finalTuitionRate = field === 'tuitionRate' ? value : (edits[schoolId]?.tuitionRate ?? targetSchool.tuitionRate ?? '');
+    const finalIsInvoice = field === 'isInvoice' ? value : (edits[schoolId]?.isInvoice ?? !!targetSchool.isInvoice);
+    const finalClassesCount = field === 'classesCount' ? value : (edits[schoolId]?.classesCount ?? dbClassesCount);
+
+    // 3. Trigger debounce save to DB
+    const timer = setTimeout(() => {
+      handleSaveSchoolRate(schoolId, finalTuitionRate, finalIsInvoice, finalClassesCount);
+    }, 800);
+    return () => clearTimeout(timer);
+  };
 
   // Generate Year-Month options
   const getMonthOptions = () => {
@@ -411,91 +348,115 @@ export default function SchoolPayrollTab({
     return { amount, isPerPeriod };
   };
 
-  // Helper: adjust period count according to business rule
+  // Helper: adjust period count according to business rule (if needed, kept for reference)
   const adjustPeriod = (p: number) => {
     if (p === 1) return 2;
     if (p === 2) return 2.5;
     return p;
   };
 
-  // Clear local storage draft data
-  const handleClearLocalData = () => {
-    if (window.confirm('Bạn có chắc chắn muốn xóa dữ liệu nháp hiện tại trên trình duyệt không? Dữ liệu đã lưu trong DB sẽ không bị ảnh hưởng.')) {
-      localStorage.removeItem('etms_school_payroll_rows_v3');
-      setCustomRows([]);
-      setCsvUploaded(false);
-      window.location.reload();
+  // Helper: format currency
+  const formatVND = (num: number) => {
+    return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(num).replace('₫', 'VNĐ');
+  };
+
+  // Helper: parse rate string
+  const parseRate = (rateStr: string) => {
+    const clean = rateStr.toLowerCase().trim();
+    
+    // Detect per-period if it contains 'tiết', 'tiet', '/t', or '/1'
+    const isPerPeriod = clean.includes('tiết') || 
+                        clean.includes('tiet') || 
+                        clean.includes('/t') || 
+                        clean.includes('/1');
+    
+    // Split by slash to avoid parsing digits in the denominator (like "/1 tiết")
+    const parts = clean.split('/');
+    const valuePart = parts[0].trim();
+    
+    let amount = 0;
+    if (valuePart.includes('k')) {
+      const match = valuePart.match(/(\d+(?:\.\d+)?)\s*k/);
+      if (match) {
+        amount = parseFloat(match[1]) * 1000;
+      }
+    } else {
+      const match = valuePart.replace(/[^0-9]/g, '');
+      const num = parseFloat(match);
+      if (!isNaN(num)) {
+        if (num < 10000) {
+          amount = num * 1000; // e.g. 725 -> 725.000 VNĐ
+        } else {
+          amount = num;
+        }
+      }
     }
+    return { amount, isPerPeriod };
   };
 
-  // Update specific row field reactively
-  const updateRowField = (rowId: string, field: keyof PayrollRowState, value: any) => {
-    setCustomRows(prev => prev.map(r => r.rowId === rowId ? { ...r, [field]: value } : r));
+  // Helper: get effective school ID from attendance log
+  const getEffectiveSchoolId = (log: AttendanceLog): string => {
+    if (log.schoolId) return log.schoolId;
+    const cls = classes.find(c => c.id === log.classId && !c.isDeleted);
+    return cls?.schoolId || '';
   };
 
-  // Duplicate a row (allows splitting schools into multiple rows)
-  const handleDuplicateRow = (rowToCopy: PayrollRowState) => {
-    const newRowId = `copy_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
-    const newRow: PayrollRowState = {
-      ...rowToCopy,
-      rowId: newRowId,
-      classesCount: 1
-    };
-    setCustomRows(prev => [...prev, newRow]);
-  };
+  // Get unique active school IDs from BOTH:
+  // 1. Weekly teaching schedules (Lịch dạy tuần chuẩn)
+  const scheduleSchoolIds = schedules.filter(s => !s.isDeleted).map(s => s.schoolId);
 
-  // Delete specific row from current list
-  const handleDeleteRow = (rowId: string) => {
-    setCustomRows(prev => prev.filter(r => r.rowId !== rowId));
-  };
+  // 2. Approved attendance logs in this month (Chấm công thực tế đã duyệt)
+  const approvedLogs = attendance.filter(a => 
+    !(a as any).isDeleted && 
+    a.date.startsWith(reportMonth) && 
+    (a.confirmedByAdmin || a.isVerified)
+  );
+  const attendanceSchoolIds = approvedLogs.map(getEffectiveSchoolId).filter(Boolean);
 
-  // Perform computations for each row
-  const calculatedRows = customRows.map(row => {
-    const { amount: unitPrice, isPerPeriod } = parseRate(row.rawHourlyRate);
+  // Merge & deduplicate school IDs to build the definitive active schools list
+  const activeSchoolIds = Array.from(new Set([...scheduleSchoolIds, ...attendanceSchoolIds]));
+
+  // Resolve school details from DB (including deleted ones only if they have approved attendance logs)
+  const activeSchools = activeSchoolIds
+    .map(id => schools.find(s => s.id === id))
+    .filter(s => s && (!s.isDeleted || attendanceSchoolIds.includes(s.id))) as School[];
+
+  // Perform computations for each school dynamically
+  const calculatedRows = activeSchools.map(sch => {
+    // Get tuitionRate, isInvoice, and classesCount (prefer local edits, fallback to DB school settings)
+    const schoolEdits = edits[sch.id] || {};
+    const rawHourlyRate = schoolEdits.tuitionRate !== undefined ? schoolEdits.tuitionRate : (sch.tuitionRate || '');
+    const isInvoice = schoolEdits.isInvoice !== undefined ? schoolEdits.isInvoice : !!sch.isInvoice;
+    
+    const schoolClasses = classes.filter(c => c.schoolId === sch.id && !c.isDeleted);
+    const dbClassesCount = sch.classesCount || schoolClasses.length || 1;
+    const classesCount = schoolEdits.classesCount !== undefined ? schoolEdits.classesCount : dbClassesCount;
+
+    const { amount: unitPrice, isPerPeriod } = parseRate(rawHourlyRate);
 
     // Attendance stats from DB
     let actualPeriods = 0;
     let expectedPeriods = 0;
 
-    // Ánh xạ classId → schoolId (dùng để vá các log bị mất liên kết schoolId)
-    const getEffectiveSchoolId = (log: AttendanceLog): string => {
-      if (log.schoolId) return log.schoolId;            // ưu tiên schoolId trực tiếp
-      const cls = classes.find(c => c.id === log.classId && !c.isDeleted);
-      return cls?.schoolId || '';
-    };
+    const schoolClassIds = new Set(schoolClasses.map(c => c.id));
 
-    // Tập hợp tất cả classId thuộc trường này (để tra ngược orphaned logs)
-    const schoolClassIds = new Set(
-      classes.filter(c => c.schoolId === row.schoolId && !c.isDeleted).map(c => c.id)
-    );
+    // 1. Expected periods from teaching schedules
+    schoolClassIds.forEach(clsId => {
+      const classSchedules = schedules.filter(s => s.classId === clsId && !s.isDeleted);
+      const classExpected = classSchedules.reduce((sum, s) =>
+        sum + (dayOfWeekOccurrences[s.dayOfWeek] || 0) * (s.periods || 1), 0
+      );
+      expectedPeriods += classExpected;
+    });
 
-    if (row.schoolId) {
-      // 1. Expected periods từ lịch phân công tuần chuẩn
-      schoolClassIds.forEach(clsId => {
-        const classSchedules = schedules.filter(s => s.classId === clsId && !s.isDeleted);
-        const classExpected = classSchedules.reduce((sum, s) =>
-          sum + (dayOfWeekOccurrences[s.dayOfWeek] || 0) * (s.periods || 1), 0
-        );
-        expectedPeriods += classExpected;
-      });
-
-      // 2. Tiết thực dạy: ưu tiên schoolId khớp trực tiếp, 
-      //    thêm fallback qua classId để bắt các log bị mất liên kết schoolId
-      const schoolLogs = attendance.filter(a => {
-        if ((a as any).isDeleted) return false;
-        if (!a.date.startsWith(reportMonth)) return false;
-        // Chỉ đếm các tiết đã được duyệt hoặc xác thực để khớp với số tiết duyệt chấm công
-        if (!(a.confirmedByAdmin || a.isVerified)) return false;
-        // Khớp trực tiếp schoolId
-        if (a.schoolId === row.schoolId) return true;
-        // Fallback: classId thuộc trường này
-        if (a.classId && schoolClassIds.has(a.classId)) return true;
-        // Fallback sâu hơn: dùng getEffectiveSchoolId cho log không có schoolId
-        if (!a.schoolId) return getEffectiveSchoolId(a) === row.schoolId;
-        return false;
-      });
-      actualPeriods = schoolLogs.reduce((acc, curr) => acc + (curr.periods || 0), 0);
-    }
+    // 2. Actual periods from approved logs in this month
+    const schoolLogs = approvedLogs.filter(a => {
+      if (a.schoolId === sch.id) return true;
+      if (a.classId && schoolClassIds.has(a.classId)) return true;
+      if (!a.schoolId) return getEffectiveSchoolId(a) === sch.id;
+      return false;
+    });
+    actualPeriods = schoolLogs.reduce((acc, curr) => acc + (curr.periods || 0), 0);
 
     let calculatedAmount = 0;
     let formula = '';
@@ -505,20 +466,24 @@ export default function SchoolPayrollTab({
       formula = `${actualPeriods} tiết thực tế × ${formatVND(unitPrice)}`;
     } else {
       const ratio = expectedPeriods > 0 ? (actualPeriods / expectedPeriods) : 0;
-      calculatedAmount = Math.round(unitPrice * row.classesCount * ratio);
+      calculatedAmount = Math.round(unitPrice * classesCount * ratio);
       
       if (expectedPeriods > 0) {
-        formula = `${formatVND(unitPrice)} × ${row.classesCount} lớp × (${actualPeriods} tiết dạy thực tế / ${expectedPeriods} tiết phải dạy)`;
+        formula = `${formatVND(unitPrice)} × ${classesCount} lớp × (${actualPeriods} tiết dạy thực tế / ${expectedPeriods} tiết phải dạy)`;
       } else {
-        formula = `${formatVND(unitPrice)} × ${row.classesCount} lớp × (0/0 tiết)`;
+        formula = `${formatVND(unitPrice)} × ${classesCount} lớp × (0/0 tiết)`;
       }
     }
 
     const missedPeriods = Math.max(0, expectedPeriods - actualPeriods);
-    const dbSchool = schools.find(s => s.id === row.schoolId);
 
     return {
-      ...row,
+      rowId: sch.id,
+      displayName: sch.name,
+      schoolId: sch.id,
+      classesCount,
+      rawHourlyRate,
+      isInvoice,
       unitPrice,
       isPerPeriod,
       actualPeriods,
@@ -526,14 +491,13 @@ export default function SchoolPayrollTab({
       missedPeriods,
       calculatedAmount,
       formula,
-      dbSchool
+      dbSchool: sch
     };
   });
 
   // Filtered rows for UI search
   const filteredRows = calculatedRows.filter(row => 
-    row.displayName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (row.dbSchool?.name || '').toLowerCase().includes(searchTerm.toLowerCase())
+    row.displayName.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   // Sorted alphabetically by displayName (A-Z)
@@ -543,75 +507,6 @@ export default function SchoolPayrollTab({
 
   const totalPayrollValue = calculatedRows.reduce((acc, curr) => acc + curr.calculatedAmount, 0);
   const totalActualPeriods = calculatedRows.reduce((acc, curr) => acc + (curr.actualPeriods || 0), 0);
-
-  // Calculate schools with approved attendance logs that are missing from customRows
-  const getEffectiveSchoolId = (log: AttendanceLog): string => {
-    if (log.schoolId) return log.schoolId;
-    const cls = classes.find(c => c.id === log.classId && !c.isDeleted);
-    return cls?.schoolId || '';
-  };
-
-  const approvedLogs = attendance.filter(a => 
-    !(a as any).isDeleted && 
-    a.date.startsWith(reportMonth) && 
-    (a.confirmedByAdmin || a.isVerified)
-  );
-
-  const currentSchoolIds = customRows.map(r => r.schoolId).filter(Boolean);
-
-  const missingSchoolsMap = new Map<string, number>();
-  approvedLogs.forEach(log => {
-    const effSchoolId = getEffectiveSchoolId(log);
-    if (!effSchoolId) return;
-    if (!currentSchoolIds.includes(effSchoolId)) {
-      missingSchoolsMap.set(effSchoolId, (missingSchoolsMap.get(effSchoolId) || 0) + log.periods);
-    }
-  });
-
-  const missingSchoolsList = Array.from(missingSchoolsMap.entries()).map(([schoolId, periods]) => {
-    const sch = schools.find(s => s.id === schoolId);
-    return {
-      schoolId,
-      name: sch ? sch.name : `ID: ${schoolId}`,
-      periods,
-      sch
-    };
-  }).filter(item => item.sch && !item.sch.isDeleted).sort((a, b) => b.periods - a.periods);
-
-  const totalMissingPeriods = missingSchoolsList.reduce((sum, item) => sum + item.periods, 0);
-  const unlinkedRowsCount = customRows.filter(r => !r.schoolId).length;
-
-  const handleAddMissingSchool = (schoolId: string) => {
-    const sch = schools.find(s => s.id === schoolId);
-    if (!sch) return;
-    const newRow: PayrollRowState = {
-      rowId: `manual_${Date.now()}_${schoolId}`,
-      displayName: sch.name,
-      schoolId: sch.id,
-      classesCount: sch.classesCount || 1,
-      rawHourlyRate: sch.tuitionRate || '',
-      isInvoice: !!sch.isInvoice,
-      isCsvRow: false
-    };
-    setCustomRows(prev => [...prev, newRow]);
-  };
-
-  const handleAddAllMissingSchools = () => {
-    const newRows: PayrollRowState[] = [];
-    missingSchoolsList.forEach(item => {
-      if (!item.sch) return;
-      newRows.push({
-        rowId: `manual_${Date.now()}_${item.schoolId}_${Math.random()}`,
-        displayName: item.name,
-        schoolId: item.schoolId,
-        classesCount: item.sch.classesCount || 1,
-        rawHourlyRate: item.sch.tuitionRate || '',
-        isInvoice: !!item.sch.isInvoice,
-        isCsvRow: false
-      });
-    });
-    setCustomRows(prev => [...prev, ...newRows]);
-  };
 
   // Copy notification message
   const handleCopyMessage = (row: typeof calculatedRows[0]) => {
@@ -711,29 +606,17 @@ export default function SchoolPayrollTab({
             </select>
           </div>
 
-          {/* Import CSV */}
-          <label className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-200/50 rounded-2xl text-xs font-bold text-slate-700 cursor-pointer transition w-full sm:w-auto justify-center">
-            <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
-            <span>Nạp Excel/CSV mới</span>
-            <input
-              type="file"
-              accept=".csv"
-              onChange={handleFileUpload}
-              className="hidden"
-            />
-          </label>
-
           {/* Auto-save Status Indicator */}
           {saveStatus === 'saving' && (
             <span className="flex items-center gap-1.5 px-3 py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-2xl text-xs font-bold animate-pulse">
               <RefreshCw className="h-3.5 w-3.5 animate-spin text-amber-600" />
-              <span>Đang tự động lưu...</span>
+              <span>Đang lưu...</span>
             </span>
           )}
           {saveStatus === 'saved' && (
             <span className="flex items-center gap-1.5 px-3 py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-2xl text-xs font-bold">
               <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-              <span>Đã tự động lưu DB</span>
+              <span>Đã lưu vào DB</span>
             </span>
           )}
           {saveStatus === 'error' && (
@@ -742,69 +625,8 @@ export default function SchoolPayrollTab({
               <span>Lỗi lưu tự động</span>
             </span>
           )}
-
-          {/* Save Configuration */}
-          <button
-            onClick={handleSaveToDatabase}
-            disabled={isSaving}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-2xl text-xs font-bold shadow-md cursor-pointer transition w-full sm:w-auto justify-center"
-          >
-            <Save className="h-4 w-4" />
-            <span>Lưu Cấu Hình vào DB</span>
-          </button>
-
-          {/* Reset Local Data */}
-          {csvUploaded && (
-            <button
-              onClick={handleClearLocalData}
-              className="flex items-center gap-2 px-4 py-2 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-600 rounded-2xl text-xs font-bold cursor-pointer transition w-full sm:w-auto justify-center"
-            >
-              <RefreshCw className="h-4 w-4" />
-              <span>Xóa nháp</span>
-            </button>
-          )}
         </div>
       </div>
-
-      {/* WARNING ALERTS */}
-      {missingSchoolsList.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-3xl p-5 shadow-sm space-y-3 animate-fadeIn">
-          <div className="flex items-start gap-3">
-            <div className="p-2 bg-amber-100 text-amber-600 rounded-2xl shrink-0 mt-0.5">
-              <AlertTriangle className="h-5 w-5" />
-            </div>
-            <div className="space-y-1">
-              <h4 className="font-bold text-amber-900 text-sm">Phát hiện lệch số tiết đã duyệt chấm công!</h4>
-              <p className="text-xs text-amber-700 leading-relaxed">
-                Hệ thống phát hiện có <strong>{totalMissingPeriods} tiết</strong> đã được duyệt chấm công trong <strong>Tháng {reportMonth.split('-')[1]}</strong> thuộc về <strong>{missingSchoolsList.length} trường</strong> nhưng các trường này chưa có trong bảng đối soát hiện tại. Điều này giải thích tại sao tổng số tiết đối soát bị lệch so với số tiết đã duyệt (ví dụ: hiển thị 618 thay vì 782).
-              </p>
-            </div>
-          </div>
-          
-          <div className="flex flex-wrap gap-2 pt-1 max-h-48 overflow-y-auto pr-2">
-            {missingSchoolsList.map(item => (
-              <div key={item.schoolId} className="flex items-center justify-between gap-3 bg-white border border-amber-100 px-3 py-1.5 rounded-2xl text-xs shadow-sm">
-                <span className="font-medium text-slate-800">{item.name} (<span className="text-amber-600 font-bold">{item.periods} tiết</span>)</span>
-                <button
-                  onClick={() => handleAddMissingSchool(item.schoolId)}
-                  className="bg-amber-100 hover:bg-amber-200 text-amber-800 font-bold px-2.5 py-1 rounded-xl text-[10px] transition cursor-pointer"
-                >
-                  + Thêm vào bảng
-                </button>
-              </div>
-            ))}
-          </div>
-
-          <div className="flex justify-end pt-1">
-            <button
-              onClick={handleAddAllMissingSchools}
-              className="bg-amber-600 hover:bg-amber-700 text-white font-bold px-4 py-2 rounded-2xl text-xs transition shadow-sm cursor-pointer"
-            >
-              Thêm tất cả {missingSchoolsList.length} trường thiếu vào đối soát (+{totalMissingPeriods} tiết)
-            </button>
-          </div>
-        </div>
-      )}
       {/* SUMMARY DASHBOARD CARDS */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="bg-gradient-to-tr from-blue-600 to-indigo-700 text-white rounded-3xl p-6 shadow-lg relative overflow-hidden">
@@ -868,39 +690,30 @@ export default function SchoolPayrollTab({
               className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 text-sm transition"
             />
           </div>
-          {csvUploaded ? (
-            <div className="text-xs text-blue-600 bg-blue-50 border border-blue-150 px-4 py-2 rounded-2xl font-semibold flex items-center gap-1.5">
-              <Sparkles className="h-4 w-4 shrink-0" />
-              <span>Đang chỉnh sửa bản nháp Excel/CSV. Nhớ click "Lưu Cấu Hình vào DB" để lưu trữ lâu dài.</span>
-            </div>
-          ) : (
-            <div className="text-xs text-amber-600 bg-amber-50 border border-amber-150 px-4 py-2 rounded-2xl font-semibold flex items-center gap-1.5">
-              <AlertTriangle className="h-4 w-4 shrink-0" />
-              <span>Đang hiển thị Cấu hình lưu trong DB. Bạn có thể nạp file Excel/CSV mới hoặc chỉnh sửa trực tiếp.</span>
-            </div>
-          )}
+          <div className="text-xs text-blue-600 bg-blue-50 border border-blue-150 px-4 py-2 rounded-2xl font-semibold flex items-center gap-1.5 animate-fadeIn">
+            <Sparkles className="h-4 w-4 shrink-0" />
+            <span>Đang đối soát danh sách trường có lịch dạy học hoặc phát sinh chấm công thực tế trong tháng. Đơn giá và số lớp tự động lưu lại vào CSDL khi chỉnh sửa.</span>
+          </div>
         </div>
 
         {/* PAYROLL DETAILS TABLE */}
-        <div className="overflow-x-auto rounded-2xl border border-slate-100">
+        <div className="overflow-x-auto rounded-2xl border border-slate-100 animate-fadeIn">
           <table className="w-full border-collapse text-left text-sm whitespace-nowrap">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-150 text-slate-500 font-mono text-xs uppercase font-semibold">
                 <th className="p-4">Tên trường</th>
-                <th className="p-4">Liên kết DB</th>
                 <th className="p-4 text-center">Số Lớp</th>
                 <th className="p-4 text-right">Đơn Giá</th>
                 <th className="p-4 text-center">Tiết Dạy / Tiết Phải Dạy</th>
                 <th className="p-4 text-right">Thành Tiền</th>
                 <th className="p-4 text-center">Thông báo</th>
-                <th className="p-4 text-center">Thao tác</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {sortedRows.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="p-8 text-center text-slate-400 font-medium font-sans">
-                    Chưa có trường nào cấu hình đơn giá học phí trong DB. Hãy nạp file Excel/CSV mới để thiết lập.
+                  <td colSpan={6} className="p-8 text-center text-slate-400 font-medium font-sans">
+                    Không tìm thấy trường nào có lịch dạy học hoặc phát sinh chấm công trong tháng này.
                   </td>
                 </tr>
               ) : (
@@ -913,36 +726,19 @@ export default function SchoolPayrollTab({
                           <input
                             type="checkbox"
                             checked={row.isInvoice}
-                            onChange={(e) => updateRowField(row.rowId, 'isInvoice', e.target.checked)}
+                            onChange={(e) => updateSchoolField(row.schoolId, 'isInvoice', e.target.checked)}
                             className="mr-1"
                           />
                           Lấy Hoá Đơn
                         </label>
                       </div>
                     </td>
-                    <td className="p-4">
-                      <select
-                        value={row.schoolId}
-                        onChange={(e) => updateRowField(row.rowId, 'schoolId', e.target.value)}
-                        className={`text-xs border rounded-xl px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 max-w-[200px] ${
-                          row.schoolId ? 'border-emerald-300 text-emerald-700 bg-emerald-50/20' : 'border-rose-300 text-rose-700 bg-rose-50/20'
-                        }`}
-                      >
-                        <option value="">-- Chưa liên kết DB --</option>
-                        {[...schools]
-                          .filter(s => !s.isDeleted)
-                          .sort((a, b) => a.name.localeCompare(b.name, 'vi', { sensitivity: 'base' }))
-                          .map(s => (
-                            <option key={s.id} value={s.id}>{s.name}</option>
-                          ))}
-                      </select>
-                    </td>
                     <td className="p-4 text-center">
                       <input
                         type="number"
                         step="0.5"
                         value={row.classesCount}
-                        onChange={(e) => updateRowField(row.rowId, 'classesCount', parseFloat(e.target.value) || 0)}
+                        onChange={(e) => updateSchoolField(row.schoolId, 'classesCount', parseFloat(e.target.value) || 0)}
                         className="w-16 border border-slate-200 rounded-xl text-center py-0.5 text-xs font-bold text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500"
                       />
                     </td>
@@ -950,38 +746,32 @@ export default function SchoolPayrollTab({
                       <input
                         type="text"
                         value={row.rawHourlyRate}
-                        onChange={(e) => updateRowField(row.rowId, 'rawHourlyRate', e.target.value)}
-                        className="w-24 border border-slate-200 rounded-xl text-right px-2 py-0.5 text-xs font-mono font-semibold text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        onChange={(e) => updateSchoolField(row.schoolId, 'tuitionRate', e.target.value)}
+                        placeholder="Nhập đơn giá (Ví dụ: 700k/t)"
+                        className="w-32 border border-slate-200 rounded-xl text-right px-2 py-0.5 text-xs font-mono font-semibold text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500"
                       />
                     </td>
                     <td className="p-4 text-center">
-                      {row.schoolId ? (
-                        <div className="text-xs space-y-0.5 animate-fadeIn">
-                          <div className="font-bold text-slate-700">
-                            {row.actualPeriods} / {row.expectedPeriods} tiết
-                          </div>
-                          {row.missedPeriods > 0 && (
-                            <div className="text-rose-500 text-[10px] font-bold font-sans">
-                              (Nghỉ {row.missedPeriods} tiết)
-                            </div>
-                          )}
+                      <div className="text-xs space-y-0.5 animate-fadeIn">
+                        <div className="font-bold text-slate-700">
+                          {row.actualPeriods} / {row.expectedPeriods} tiết
                         </div>
-                      ) : (
-                        <span className="text-[10px] text-rose-500 bg-rose-50 border border-rose-100 px-2 py-1 rounded-xl font-bold animate-pulse">
-                          Chờ liên kết DB
-                        </span>
-                      )}
+                        {row.missedPeriods > 0 && (
+                          <div className="text-rose-500 text-[10px] font-bold font-sans">
+                            (Nghỉ {row.missedPeriods} tiết)
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="p-4 text-right animate-fadeIn" title={row.formula}>
                       <div className="font-bold text-slate-900 font-mono cursor-help hover:text-blue-600 transition">
-                        {row.schoolId ? formatVND(row.calculatedAmount) : formatVND(0)}
+                        {formatVND(row.calculatedAmount)}
                       </div>
                     </td>
                     <td className="p-4 text-center">
                       <button
                         onClick={() => handleCopyMessage(row)}
-                        disabled={!row.schoolId}
-                        className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition mx-auto border cursor-pointer active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed ${
+                        className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition mx-auto border cursor-pointer active:scale-95 ${
                           copiedSchoolId === row.rowId
                             ? 'bg-emerald-500 text-white border-emerald-500 shadow-md'
                             : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
@@ -1000,34 +790,12 @@ export default function SchoolPayrollTab({
                         )}
                       </button>
                     </td>
-                    <td className="p-4 text-center">
-                      <div className="flex items-center justify-center gap-1">
-                        <button
-                          onClick={() => handleDuplicateRow(row)}
-                          className="p-1.5 hover:bg-blue-50 rounded-xl text-slate-400 hover:text-blue-600 transition cursor-pointer"
-                          title="Tách / Nhân bản trường này thành 2 dòng"
-                        >
-                          <Plus className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => {
-                            if (window.confirm(`Bạn có chắc chắn muốn xóa dòng "${row.displayName}" này khỏi danh sách đối soát tháng này?`)) {
-                              handleDeleteRow(row.rowId);
-                            }
-                          }}
-                          className="p-1.5 hover:bg-rose-50 rounded-xl text-slate-400 hover:text-rose-600 transition cursor-pointer"
-                          title="Xóa dòng này"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </td>
                   </tr>
                 ))
               )}
               {/* DÒNG TỔNG KẾT CUỐI BẢNG */}
               <tr className="bg-gradient-to-r from-slate-800 to-slate-900 text-white">
-                <td className="p-4" colSpan={2}>
+                <td className="p-4">
                   <div className="flex items-center gap-2 font-bold text-sm">
                     <span className="text-lg">📊</span>
                     <span>TỔNG CỘNG THÁNG {reportMonth}</span>
@@ -1052,7 +820,7 @@ export default function SchoolPayrollTab({
                   </div>
                   <div className="text-[10px] text-slate-400 mt-0.5">tổng học phí phải thu</div>
                 </td>
-                <td className="p-4 text-center" colSpan={2}>
+                <td className="p-4 text-center">
                   <span className="text-slate-400 text-xs">—</span>
                 </td>
               </tr>
