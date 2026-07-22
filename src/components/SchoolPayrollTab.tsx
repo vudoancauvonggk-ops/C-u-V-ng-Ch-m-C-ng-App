@@ -512,14 +512,6 @@ export default function SchoolPayrollTab({
         </div>
 
         <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto justify-end">
-          {/* Merge Schools Button */}
-          <button
-            onClick={() => setIsMergeModalOpen(true)}
-            className="flex items-center gap-1.5 px-4 py-2 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 rounded-2xl text-xs font-bold transition cursor-pointer"
-          >
-            <CopyPlus className="h-4 w-4" />
-            <span>Hợp nhất trường</span>
-          </button>
 
           {/* Month Selector */}
           <div className="flex items-center gap-2 bg-slate-50 border border-slate-100 px-3 py-1.5 rounded-2xl w-full sm:w-auto">
@@ -650,7 +642,19 @@ export default function SchoolPayrollTab({
                 sortedRows.map((row) => (
                   <tr key={row.rowId} className="hover:bg-slate-50/50 transition">
                     <td className="p-4">
-                      <div className="font-semibold text-slate-900">{row.displayName}</div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-semibold text-slate-900">{row.displayName}</span>
+                        <button
+                          onClick={() => {
+                            setMergeSourceId(row.schoolId);
+                            setIsMergeModalOpen(true);
+                          }}
+                          className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition cursor-pointer"
+                          title="Hợp nhất (gộp) trường này vào trường khác"
+                        >
+                          <CopyPlus className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                       <div className="flex flex-wrap gap-1.5 items-center mt-1">
                         <label className="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.2 rounded border border-slate-200 font-bold uppercase cursor-pointer select-none">
                           <input
@@ -794,24 +798,14 @@ export default function SchoolPayrollTab({
 
             <div className="space-y-4">
               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700">1. Chọn trường NGUỒN (Trường sai tên/Cần gộp đi):</label>
-                <select
-                  value={mergeSourceId}
-                  onChange={(e) => setMergeSourceId(e.target.value)}
-                  className="w-full text-xs border border-slate-200 rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-blue-550"
-                >
-                  <option value="">-- Chọn trường nguồn --</option>
-                  {[...schools]
-                    .filter(s => !s.isDeleted)
-                    .sort((a, b) => a.name.localeCompare(b.name, 'vi', { sensitivity: 'base' }))
-                    .map(s => (
-                      <option key={s.id} value={s.id}>{s.name} (ID: {s.id})</option>
-                    ))}
-                </select>
+                <label className="text-xs font-bold text-slate-700">Trường nguồn cần gộp (sẽ bị xóa sau khi gộp):</label>
+                <div className="w-full text-xs border border-slate-200 bg-slate-50 text-slate-750 font-bold rounded-xl px-3 py-2">
+                  {schools.find(s => s.id === mergeSourceId)?.name || 'Chưa chọn'}
+                </div>
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700">2. Chọn trường ĐÍCH (Trường đúng tên/Cần gộp vào):</label>
+                <label className="text-xs font-bold text-slate-700">Chọn trường ĐÍCH (Trường đúng tên/Cần gộp vào):</label>
                 <select
                   value={mergeTargetId}
                   onChange={(e) => setMergeTargetId(e.target.value)}
@@ -822,7 +816,7 @@ export default function SchoolPayrollTab({
                     .filter(s => !s.isDeleted && s.id !== mergeSourceId)
                     .sort((a, b) => a.name.localeCompare(b.name, 'vi', { sensitivity: 'base' }))
                     .map(s => (
-                      <option key={s.id} value={s.id}>{s.name} (ID: {s.id})</option>
+                      <option key={s.id} value={s.id}>{s.name}</option>
                     ))}
                 </select>
               </div>
