@@ -303,10 +303,11 @@ export function ContractCenter() {
 
   const filteredContracts = useMemo(() => {
     const query = searchQuery.toLowerCase();
-    return contracts.filter(c => 
-      c.title.toLowerCase().includes(query) ||
-      c.partner.toLowerCase().includes(query) ||
-      c.id.toLowerCase().includes(query) ||
+    const safeContracts = Array.isArray(contracts) ? contracts : [];
+    return safeContracts.filter(c => 
+      (c.title || '').toLowerCase().includes(query) ||
+      (c.partner || '').toLowerCase().includes(query) ||
+      (c.id || '').toLowerCase().includes(query) ||
       (c.taxCode && c.taxCode.includes(query)) ||
       (c.signer && c.signer.toLowerCase().includes(query))
     ).sort((a, b) => parseDate(a.date) - parseDate(b.date));

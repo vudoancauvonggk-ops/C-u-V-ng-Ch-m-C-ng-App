@@ -25,9 +25,18 @@ export function ComplianceCenter() {
 
   useEffect(() => {
     get('ai_compliance_data').then(val => {
-      if (val) {
-        // Merge with initial just in case
-        setData(prev => ({ ...prev, ...val }));
+      if (val && typeof val === 'object' && !Array.isArray(val)) {
+        setData(prev => {
+          const merged = { ...prev, ...val };
+          for (const key of ['Thuế', 'BHXH', 'Lao động', 'Y tế']) {
+            if (!merged[key] || typeof merged[key] !== 'object') {
+              merged[key] = { files: [], reminders: [] };
+            }
+            if (!Array.isArray(merged[key].files)) merged[key].files = [];
+            if (!Array.isArray(merged[key].reminders)) merged[key].reminders = [];
+          }
+          return merged;
+        });
       }
     });
   }, []);
@@ -245,7 +254,11 @@ export function ComplianceCenter() {
     save(newData);
   };
 
-  const areaData = data[selectedArea] || { files: [], reminders: [] };
+  const rawAreaData = data[selectedArea] || {};
+  const areaData = {
+    files: Array.isArray(rawAreaData.files) ? rawAreaData.files : [],
+    reminders: Array.isArray(rawAreaData.reminders) ? rawAreaData.reminders : []
+  };
 
   return (
     <div className="p-8 w-full mx-auto h-full flex flex-col">
@@ -262,14 +275,15 @@ export function ComplianceCenter() {
             <h2 className="font-semibold text-slate-900 mb-4 px-2">Lĩnh vực theo dõi</h2>
             <div className="space-y-2">
               {complianceAreas.map((area) => {
-                const areaInfo = data[area.id] || { files: [], reminders: [] };
-                const hasWarning = areaInfo.reminders.some(r => {
+                const areaInfo = data[area.id] || {};
+                const reminders = Array.isArray(areaInfo.reminders) ? areaInfo.reminders : [];
+                const hasWarning = reminders.some((r: any) => {
                   const d = new Date(r.date);
                   const now = new Date();
                   const diff = d.getTime() - now.getTime();
                   return diff > 0 && diff < 7 * 24 * 60 * 60 * 1000; // less than 7 days
                 });
-                const isLate = areaInfo.reminders.some(r => {
+                const isLate = reminders.some((r: any) => {
                    return new Date(r.date) < new Date();
                 });
 
@@ -354,7 +368,7 @@ export function ComplianceCenter() {
                                 </button>
                               );
                             })()}
-                            {guide.docs.map((doc: any, dIdx: number) => (
+                            {(guide.docs || []).map((doc: any, dIdx: number) => (
                               <a 
                                 key={dIdx} 
                                 href={doc.url} 

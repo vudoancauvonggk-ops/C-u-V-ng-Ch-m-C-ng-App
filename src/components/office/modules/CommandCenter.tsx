@@ -173,7 +173,8 @@ export function CommandCenter() {
   };
 
   // Tính toán thống kê
-  const statsByYear = contracts.reduce((acc: any, c: any) => {
+  const safeContracts = Array.isArray(contracts) ? contracts : [];
+  const statsByYear = safeContracts.reduce((acc: any, c: any) => {
     const year = getYearFromDate(c.startDate || c.date);
     acc[year] = (acc[year] || 0) + 1;
     return acc;
@@ -181,17 +182,17 @@ export function CommandCenter() {
 
   const sortedYears = Object.keys(statsByYear).sort((a, b) => b.localeCompare(a));
 
-  const expiredContracts = contracts.filter(c => {
+  const expiredContracts = safeContracts.filter(c => {
     const daysLeft = getRemainingDays(c.date);
     return daysLeft !== null && daysLeft < 0;
   });
 
-  const expiringSoonContracts = contracts.filter(c => {
+  const expiringSoonContracts = safeContracts.filter(c => {
     const daysLeft = getRemainingDays(c.date);
     return daysLeft !== null && daysLeft >= 0 && daysLeft <= 30;
   });
 
-  const waitingToSign = contracts.filter(c => c.status === 'Chờ ký');
+  const waitingToSign = safeContracts.filter(c => c.status === 'Chờ ký');
 
   // Tính toán cảnh báo tuân thủ & báo cáo
   const todayDate = new Date('2026-07-07');
