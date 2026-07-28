@@ -6,12 +6,13 @@ import {
   Users, Building, Calendar, DollarSign, FileSpreadsheet, FileText, 
   Plus, Edit2, Trash2, GripVertical, Check, X, ShieldAlert, MapPin, QrCode, 
   Clock, ArrowLeftRight, Search, Printer, RefreshCw, AlertTriangle, Eye, CheckCircle2,
-  ShieldCheck, Download, Upload, Activity, Camera, Megaphone, Send, GitMerge
+  ShieldCheck, Download, Upload, Activity, Camera, Megaphone, Send, GitMerge, Briefcase
 } from 'lucide-react';
 import { Teacher, School, ClassInfo, Schedule, AttendanceLog, ChangeRequest, AuditLog, SystemNotification, AppUser, AppSettings, MeetingAttendance } from '../types';
 import SheetsSyncModal from './SheetsSyncModal';
 import SystemHealth from './SystemHealth';
 import SchoolPayrollTab from './SchoolPayrollTab';
+import OfficeAppContainer from './office/OfficeAppContainer';
 
 const AVAILABLE_PERMISSIONS = [
   { value: 'can_view_all_teachers', label: 'Xem hồ sơ & thù lao tất cả giáo viên' },
@@ -22,7 +23,14 @@ const AVAILABLE_PERMISSIONS = [
   { value: 'can_view_audit_logs', label: 'Truy cập nhật ký vết bảo mật' },
   { value: 'can_edit_schedule', label: 'Sửa đổi lịch dạy hàng tuần' },
   { value: 'can_edit_school_address', label: 'Được quyền chỉnh sửa địa chỉ trường học' },
-  { value: 'can_manage_meeting_attendance', label: 'Điểm danh họp & chuyên môn' }
+  { value: 'can_manage_meeting_attendance', label: 'Điểm danh họp & chuyên môn' },
+  { value: 'can_access_office_ai', label: 'Văn Phòng AI: Truy cập toàn bộ 6 module Văn Phòng' },
+  { value: 'can_view_office_command_center', label: 'Văn Phòng AI: Trung tâm công việc' },
+  { value: 'can_view_office_contracts', label: 'Văn Phòng AI: Quản lý hợp đồng' },
+  { value: 'can_view_office_documents', label: 'Văn Phòng AI: Kho hồ sơ doanh nghiệp' },
+  { value: 'can_view_office_compliance', label: 'Văn Phòng AI: Quản lý tuân thủ' },
+  { value: 'can_view_office_telegram', label: 'Văn Phòng AI: Liên kết Telegram' },
+  { value: 'can_view_office_candidates', label: 'Văn Phòng AI: Quản lý tuyển dụng' }
 ];
 
 const ensureArray = (val: any): string[] => {
@@ -465,10 +473,11 @@ export default function AdminDashboard({
     }
   };
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'schedules' | 'teachers' | 'schools' | 'attendance' | 'changes' | 'reports' | 'logs' | 'trash' | 'accounts' | 'meeting_attendance' | 'system_health' | 'school_cancellations' | 'school_payroll'>('dashboard');
-  const [dashboardHistoryYear, setDashboardHistoryYear] = useState<string>('2026');
-  const [dashboardHistoryMonth, setDashboardHistoryMonth] = useState<string>('06');
+  const nowForDashboardHistory = new Date();
+  const [dashboardHistoryYear, setDashboardHistoryYear] = useState<string>(() => String(nowForDashboardHistory.getFullYear()));
+  const [dashboardHistoryMonth, setDashboardHistoryMonth] = useState<string>(() => String(nowForDashboardHistory.getMonth() + 1).padStart(2, '0'));
   const [trashCategory, setTrashCategory] = useState<'schedules' | 'teachers' | 'schools' | 'classes'>('schedules');
+  const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [selectedCancellationSchool, setSelectedCancellationSchool] = useState<{ school: School, cancellations: any[] } | null>(null);
   const [quickEditClassData, setQuickEditClassData] = useState<{
     name: string;
@@ -2052,6 +2061,7 @@ export default function AdminDashboard({
           (currentUser?.role === 'admin' || hasPermission('can_view_audit_logs')) ? { id: 'logs', label: 'Nhật Ký Audit', icon: FileText } : null,
           currentUser?.role === 'admin' ? { id: 'accounts', label: 'Cấp Quyền / Tài Khoản', icon: ShieldCheck } : null,
           currentUser?.role === 'admin' ? { id: 'system_health', label: 'Sức Khỏe Hệ Thống', icon: Activity } : null,
+          (currentUser?.role === 'admin' || hasPermission('can_access_office_ai') || hasPermission('can_view_office_command_center') || hasPermission('can_view_office_contracts') || hasPermission('can_view_office_documents') || hasPermission('can_view_office_compliance') || hasPermission('can_view_office_telegram') || hasPermission('can_view_office_candidates')) ? { id: 'office_ai', label: 'Quản Lý Văn Phòng AI', icon: Briefcase } : null,
           currentUser?.role === 'admin' ? { id: 'trash', label: 'Thùng Rác', icon: Trash2, count: rawSchedules.filter(s => s.isDeleted).length + rawTeachers.filter(t => t.isDeleted).length + rawSchools.filter(s => s.isDeleted).length + rawClasses.filter(c => c.isDeleted).length } : null
         ].filter(Boolean) as any[]).map((tab) => {
           const Icon = tab.icon;
@@ -2112,8 +2122,10 @@ export default function AdminDashboard({
                   <Calendar className="h-6 w-6" />
                 </div>
                 <div>
-                  <p className="text-xs text-slate-400 font-mono font-medium">ĐÃ CHẤM CÔNG THÁNG NÀY</p>
-                  <h3 className="text-2xl font-bold text-slate-800 mt-1">{attendance.length} <span className="text-xs font-normal text-slate-400">buổi dạy</span></h3>
+                  <p className="text-xs text-slate-400 font-mono font-medium">ĐÃ CHẤM CÔNG THÁNG ({reportMonth || ''})</p>
+                  <h3 className="text-2xl font-bold text-slate-800 mt-1">
+                    {(attendance || []).filter(a => a && a.date && typeof a.date === 'string' && a.date.startsWith(reportMonth) && (a.confirmedByAdmin || a.isVerified)).reduce((sum, a) => sum + (Number(a.periods) || 1), 0)} <span className="text-xs font-normal text-slate-400">tiết dạy</span>
+                  </h3>
                 </div>
               </div>
 
@@ -2601,6 +2613,7 @@ export default function AdminDashboard({
 
         {/* ----------------TAB 2: TEACHING SCHEDULES (CALENDAR BUILDER) ---------------- */}
         {activeTab === 'system_health' && <SystemHealth />}
+        {activeTab === 'office_ai' && <OfficeAppContainer currentUser={currentUser} hasPermission={hasPermission} />}
 
         {activeTab === 'school_payroll' && (
           <SchoolPayrollTab
@@ -2609,6 +2622,7 @@ export default function AdminDashboard({
             attendance={rawAttendance}
             schedules={rawSchedules}
             schoolCancellations={schoolCancellations}
+            changeRequests={rawChanges}
             currentUser={currentUser}
             onAddAuditLog={onAddAuditLog}
             onUpdateSchools={onUpdateSchools}
@@ -3834,149 +3848,261 @@ export default function AdminDashboard({
             </div>
 
             {/* Structured calculation columns explaining the formula: (Tổng tiết * Đơn Giá) + Phụ Cấp + Thưởng - Khẩu Trừ */}
-            <div className="p-4 bg-blue-55 text-blue-900 border border-blue-100 rounded-2xl text-xs flex flex-col md:flex-row md:items-center justify-between gap-3 bg-blue-50/50">
-              <div className="space-y-0.5">
-                <p className="font-bold">✨ Tự động áp dụng Công thức thù lao ETMS:</p>
-                <p className="text-slate-600">Lương thực lĩnh = (Tổng số tiết × Đơn giá) + Phụ cấp + Chuyên cần - BHXH - Ứng lương - Phạt vi phạm.</p>
-              </div>
-              <div className="shrink-0 text-right">
-                <span className="text-[11px] bg-blue-100 text-blue-800 border border-blue-200 px-2 py-1 rounded font-mono font-bold">Tháng phân tích: {reportMonth}</span>
-              </div>
-            </div>
+            {(() => {
+              const sortedTeachers = [...reportTeachers].sort((a: any, b: any) => {
+                if (searchTerm) return 0;
+                const iA = teacherOrder.indexOf(a.id);
+                const iB = teacherOrder.indexOf(b.id);
+                if (iA === -1 && iB === -1) return 0;
+                if (iA === -1) return 1;
+                if (iB === -1) return -1;
+                return iA - iB;
+              });
 
-            <div className="overflow-x-auto">
-              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleTeacherDragEnd}>
-              <table className="w-full border-collapse text-left text-sm whitespace-nowrap">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-150 text-slate-500 font-mono text-xs uppercase font-semibold">
-                    <th className="p-3">Mã GV</th>
-                    <th className="p-3">Họ và Tên</th>
-                    <th className="p-3 text-center">Tiết Chốt</th>
-                    <th className="p-3 text-right">Đơn giá</th>
-                    <th className="p-3 text-center text-indigo-600">Bổ sung tiết</th>
-                    <th className="p-3 text-right">Phần thù lao tiết</th>
-                    <th className="p-3 text-right">Phụ Cấp</th>
-                    <th className="p-3 text-right">Chuyên Cần</th>
-                    <th className="p-3 text-right text-red-600">BHXH</th>
-                    <th className="p-3 text-right text-amber-600">Ứng Lương</th>
-                    <th className="p-3 text-right text-red-600">Phạt</th>
-                    <th className="p-3 text-right font-bold text-slate-950">LƯƠNG THỰC LĨNH</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                    <SortableContext items={reportTeachers.map((t: any) => t.id)} strategy={verticalListSortingStrategy}>
-                      {reportTeachers
-                        .sort((a: any, b: any) => {
-                          if (searchTerm) return 0;
-                          const iA = teacherOrder.indexOf(a.id);
-                          const iB = teacherOrder.indexOf(b.id);
-                          if (iA === -1 && iB === -1) return 0;
-                          if (iA === -1) return 1;
-                          if (iB === -1) return -1;
-                          return iA - iB;
-                        })
-                        .map((teacher: any) => {
-                          // Filter attendance logs of this teacher that are within selected month AND confirmed or verified
-                          const tLogs = rawAttendance.filter((a: any) => a.teacherId === teacher.id && a.date.startsWith(reportMonth) && (a.confirmedByAdmin || a.isVerified));
-                          
-                          const approvedSubRequests = rawChanges.filter((c: any) => c.status === 'approved' && c.targetTeacherId === teacher.id && c.date.startsWith(reportMonth));
-                                                    const substituteLogs = tLogs.filter((log: any) => {
-                            const sched = rawSchedules.find((s: any) => !s.isDeleted && s.id === log.scheduleId);
-                            return sched && sched.teacherId !== teacher.id;
-                          });
-                          const regularLogs = tLogs.filter((log: any) => {
-                            const sched = rawSchedules.find((s: any) => !s.isDeleted && s.id === log.scheduleId);
-                            return !sched || sched.teacherId === teacher.id;
-                          });
+              const payrollList = sortedTeachers.map((teacher: any) => {
+                if (!teacher) return null;
+                const tLogs = (rawAttendance || []).filter((a: any) => a && a.teacherId === teacher.id && a.date && typeof a.date === 'string' && a.date.startsWith(reportMonth) && (a.confirmedByAdmin || a.isVerified));
+                
+                const approvedSubRequests = (rawChanges || []).filter((c: any) => c && c.status === 'approved' && c.targetTeacherId === teacher.id && c.date && typeof c.date === 'string' && c.date.startsWith(reportMonth));
+                const substituteLogs = tLogs.filter((log: any) => {
+                  const sched = (rawSchedules || []).find((s: any) => s && !s.isDeleted && s.id === log.scheduleId);
+                  return sched && sched.teacherId !== teacher.id;
+                });
+                const regularLogs = tLogs.filter((log: any) => {
+                  const sched = (rawSchedules || []).find((s: any) => s && !s.isDeleted && s.id === log.scheduleId);
+                  return !sched || sched.teacherId === teacher.id;
+                });
 
-                          // Group by date + session for period adjustment
-                          const adjustPeriods = (logs: any[]) => {
-                            const groups: Record<string, any[]> = {};
-                            logs.forEach((l: any) => {
-                              const key = l.date + '_' + getSessionType(l.session);
-                              if (!groups[key]) groups[key] = [];
-                              groups[key].push(l);
-                            });
-                            let total = 0;
-                            Object.values(groups).forEach(group => {
-                              let sum = group.reduce((acc: number, curr: any) => acc + curr.periods, 0);
-                              if (sum === 1) sum = 2;
-                              else if (sum === 2) sum = 2.5;
-                              total += sum;
-                            });
-                            return total;
-                          };
-                          
-                          const regularPeriods = adjustPeriods(regularLogs);
-                          const substitutePeriods = adjustPeriods(substituteLogs);
-                          
-                          let bonusPeriodsDict: Record<string, number> = {};
-                          try {
-                            if (teacher.bonusPeriodsJSON) {
-                              bonusPeriodsDict = JSON.parse(teacher.bonusPeriodsJSON);
-                            }
-                          } catch(e) {}
-                          const currentBonusPeriods = bonusPeriodsDict[reportMonth] || 0;
-                          
-                          const schoolClosedArrivedPeriods = schoolCancellations.filter(c => c.teacherId === teacher.id && c.date.startsWith(reportMonth) && c.cancellationType === 'arrived').length;
-                          const totalPeriods = regularPeriods + substitutePeriods + currentBonusPeriods + schoolClosedArrivedPeriods;
-                          const baseLessonsSalary = (regularPeriods + currentBonusPeriods + schoolClosedArrivedPeriods) * teacher.hourlyRate + substitutePeriods * 55000;
-                          
-                          // Giữ lại logic phụ cấp 500k cứng + chuyên cần 300k
-                          const hasApprovedLeave = changes.some((c: any) => c.teacherId === teacher.id && c.status === 'approved' && c.date.startsWith(reportMonth) && (c.requestType === 'sick_leave' || c.requestType === 'substitute_teacher'));
-                          const artEvents = changes.filter((c: any) => c.teacherId === teacher.id && c.status === 'approved' && c.date.startsWith(reportMonth) && c.requestType === 'art_performance');
-                          let artPerformanceBonus = 0;
-                          artEvents.forEach((c: any) => {
-                            const match = c.reason.match(/\[Số lượng: (\d+)\]/);
-                            if (match) artPerformanceBonus += parseInt(match[1]) * 100000;
-                            else artPerformanceBonus += 100000;
-                          });
-                          const allowance = teacher.monthlyAllowance || 500000;
-                          const potentialBonus = teacher.bonus || 300000;
-                          const attendanceBonus = (hasApprovedLeave ? 0 : potentialBonus) + artPerformanceBonus;
-                          const socialInsurance = teacher.socialInsurance || 0;
-                          const advanceSalary = teacher.advanceSalary || 0;
-                          const deduction = teacher.deduction || 0;
-                          const finalWage = baseLessonsSalary + allowance + attendanceBonus - deduction - socialInsurance - advanceSalary;
+                const adjustPeriods = (logs: any[]) => {
+                  const groups: Record<string, any[]> = {};
+                  logs.forEach((l: any) => {
+                    if (!l || !l.date) return;
+                    const key = l.date + '_' + getSessionType(l.session);
+                    if (!groups[key]) groups[key] = [];
+                    groups[key].push(l);
+                  });
+                  let total = 0;
+                  Object.values(groups).forEach(group => {
+                    let sum = group.reduce((acc: number, curr: any) => acc + (Number(curr?.periods) || 1), 0);
+                    if (sum === 1) sum = 2;
+                    else if (sum === 2) sum = 2.5;
+                    total += sum;
+                  });
+                  return total;
+                };
+                
+                const regularPeriods = adjustPeriods(regularLogs);
+                const substitutePeriods = adjustPeriods(substituteLogs);
+                
+                let bonusPeriodsDict: Record<string, number> = {};
+                try {
+                  if (teacher.bonusPeriodsJSON) {
+                    bonusPeriodsDict = JSON.parse(teacher.bonusPeriodsJSON);
+                  }
+                } catch(e) {}
+                const currentBonusPeriods = Number(bonusPeriodsDict[reportMonth]) || 0;
+                
+                const schoolClosedArrivedPeriods = (schoolCancellations || []).filter(c => c && c.teacherId === teacher.id && c.date && typeof c.date === 'string' && c.date.startsWith(reportMonth) && c.cancellationType === 'arrived').length;
+                const totalPeriods = regularPeriods + substitutePeriods + currentBonusPeriods + schoolClosedArrivedPeriods;
+                const hourlyRate = Number(teacher.hourlyRate) || 0;
+                const baseLessonsSalary = (regularPeriods + currentBonusPeriods + schoolClosedArrivedPeriods) * hourlyRate + substitutePeriods * 55000;
+                
+                const hasApprovedLeave = (changes || []).some((c: any) => c && c.teacherId === teacher.id && c.status === 'approved' && c.date && typeof c.date === 'string' && c.date.startsWith(reportMonth) && (c.requestType === 'sick_leave' || c.requestType === 'substitute_teacher'));
+                const artEvents = (changes || []).filter((c: any) => c && c.teacherId === teacher.id && c.status === 'approved' && c.date && typeof c.date === 'string' && c.date.startsWith(reportMonth) && c.requestType === 'art_performance');
+                let artPerformanceBonus = 0;
+                artEvents.forEach((c: any) => {
+                  const match = ((c && c.reason) || '').match(/\[Số lượng: (\d+)\]/);
+                  if (match) artPerformanceBonus += parseInt(match[1]) * 100000;
+                  else artPerformanceBonus += 100000;
+                });
+                const allowance = Number(teacher.monthlyAllowance) || 500000;
+                const potentialBonus = Number(teacher.bonus) || 300000;
+                const attendanceBonus = (hasApprovedLeave ? 0 : potentialBonus) + artPerformanceBonus;
+                const socialInsurance = Number(teacher.socialInsurance) || 0;
+                const advanceSalary = Number(teacher.advanceSalary) || 0;
+                const deduction = Number(teacher.deduction) || 0;
+                const finalWage = baseLessonsSalary + allowance + attendanceBonus - deduction - socialInsurance - advanceSalary;
 
-                          return (
-                            <SortableReportRow 
-                              key={teacher.id}
-                              teacher={teacher}
-                              totalPeriods={totalPeriods}
-                              formatVND={formatVND}
-                              baseLessonsSalary={baseLessonsSalary}
-                              currentBonusPeriods={currentBonusPeriods}
-                              onUpdateBonus={(val: number) => {
-                                const newDict = { ...bonusPeriodsDict, [reportMonth]: val };
-                                if (val === 0) delete newDict[reportMonth];
-                                const updatedTeacher = { ...teacher, bonusPeriodsJSON: JSON.stringify(newDict) };
-                                fetch('/api/teachers', {
-                                  method: 'POST',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify(updatedTeacher)
-                                }).then(() => {
-                                  onUpdateTeachers(teachers.map((t: any) => t.id === teacher.id ? updatedTeacher : t));
-                                }).catch(console.error);
-                              }}
-                              allowance={allowance}
-                              hasApprovedLeave={hasApprovedLeave}
-                              attendanceBonus={attendanceBonus}
-                              potentialBonus={potentialBonus}
-                              artPerformanceBonus={artPerformanceBonus}
-                              socialInsurance={socialInsurance}
-                              advanceSalary={advanceSalary}
-                              deduction={deduction}
-                              finalWage={finalWage}
-                              isAdmin={currentUser?.role === 'admin'}
-                            />
-                          );
-                        })}
-                    </SortableContext>
-                </tbody>
-              </table>
-              </DndContext>
-            </div>
+                return {
+                  teacher,
+                  totalPeriods,
+                  baseLessonsSalary,
+                  currentBonusPeriods,
+                  bonusPeriodsDict,
+                  allowance,
+                  hasApprovedLeave,
+                  attendanceBonus,
+                  potentialBonus,
+                  artPerformanceBonus,
+                  socialInsurance,
+                  advanceSalary,
+                  deduction,
+                  finalWage
+                };
+              }).filter(Boolean);
+
+              const totals = payrollList.reduce((acc, item) => ({
+                periods: acc.periods + item.totalPeriods,
+                baseSalary: acc.baseSalary + item.baseLessonsSalary,
+                allowance: acc.allowance + item.allowance,
+                attendanceBonus: acc.attendanceBonus + item.attendanceBonus,
+                socialInsurance: acc.socialInsurance + item.socialInsurance,
+                advanceSalary: acc.advanceSalary + item.advanceSalary,
+                deduction: acc.deduction + item.deduction,
+                finalWage: acc.finalWage + item.finalWage,
+              }), {
+                periods: 0,
+                baseSalary: 0,
+                allowance: 0,
+                attendanceBonus: 0,
+                socialInsurance: 0,
+                advanceSalary: 0,
+                deduction: 0,
+                finalWage: 0,
+              });
+
+              return (
+                <React.Fragment>
+                  {/* Top Summary Stat Cards for Total Salary & Key Metrics */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="p-4 bg-gradient-to-br from-emerald-600 via-teal-700 to-slate-900 text-white rounded-2xl shadow-sm flex items-center justify-between col-span-1 sm:col-span-2">
+                      <div>
+                        <span className="text-[11px] uppercase tracking-wider font-semibold text-emerald-200 block">
+                          💰 TỔNG QUỸ LƯƠNG CÔNG TY PHẢI TRẢ (TỚI HIỆN TẠI)
+                        </span>
+                        <div className="text-2xl sm:text-3xl font-extrabold font-mono mt-1 text-white tracking-tight">
+                          {formatVND(totals.finalWage)}
+                        </div>
+                        <p className="text-[11px] text-emerald-100/80 mt-1">
+                          Chuẩn bị ngân sách cho <strong className="text-white">{payrollList.length} giáo viên</strong> trong tháng {reportMonth}
+                        </p>
+                      </div>
+                      <div className="hidden sm:flex items-center justify-center w-12 h-12 rounded-xl bg-white/10 backdrop-blur-sm border border-white/20 text-emerald-200 shrink-0">
+                        <DollarSign className="w-6 h-6" />
+                      </div>
+                    </div>
+
+                    <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl flex flex-col justify-between">
+                      <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">TỔNG TIẾT CHỐT DẠY</span>
+                      <strong className="text-xl text-blue-600 font-mono block mt-1">{totals.periods} tiết</strong>
+                      <span className="text-[11px] text-slate-400 mt-1 block">Tất cả ca hợp lệ & bổ sung</span>
+                    </div>
+
+                    <div className="p-4 bg-emerald-50/60 border border-emerald-100 rounded-2xl flex flex-col justify-between">
+                      <span className="text-[10px] text-emerald-700 font-bold uppercase tracking-wider block">PHỤ CẤP + CHUYÊN CẦN</span>
+                      <strong className="text-xl text-emerald-700 font-mono block mt-1">{formatVND(totals.allowance + totals.attendanceBonus)}</strong>
+                      <span className="text-[11px] text-emerald-600/70 mt-1 block">Xăng xe & thưởng</span>
+                    </div>
+                  </div>
+
+                  {/* Structured calculation columns explaining the formula: (Tổng tiết * Đơn Giá) + Phụ Cấp + Thưởng - Khẩu Trừ */}
+                  <div className="p-4 bg-blue-50/50 text-blue-900 border border-blue-100 rounded-2xl text-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+                    <div className="space-y-0.5">
+                      <p className="font-bold">✨ Tự động áp dụng Công thức thù lao ETMS:</p>
+                      <p className="text-slate-600">Lương thực lĩnh = (Tổng số tiết × Đơn giá) + Phụ cấp + Chuyên cần - BHXH - Ứng lương - Phạt vi phạm.</p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <span className="text-[11px] bg-blue-100 text-blue-800 border border-blue-200 px-2 py-1 rounded font-mono font-bold">Tháng phân tích: {reportMonth}</span>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleTeacherDragEnd}>
+                    <table className="w-full border-collapse text-left text-sm whitespace-nowrap">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-150 text-slate-500 font-mono text-xs uppercase font-semibold">
+                          <th className="p-3">Mã GV</th>
+                          <th className="p-3">Họ và Tên</th>
+                          <th className="p-3 text-center">Tiết Chốt</th>
+                          <th className="p-3 text-right">Đơn giá</th>
+                          <th className="p-3 text-center text-indigo-600">Bổ sung tiết</th>
+                          <th className="p-3 text-right">Phần thù lao tiết</th>
+                          <th className="p-3 text-right">Phụ Cấp</th>
+                          <th className="p-3 text-right">Chuyên Cần</th>
+                          <th className="p-3 text-right text-red-600">BHXH</th>
+                          <th className="p-3 text-right text-amber-600">Ứng Lương</th>
+                          <th className="p-3 text-right text-red-600">Phạt</th>
+                          <th className="p-3 text-right font-bold text-slate-950">LƯƠNG THỰC LĨNH</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                          <SortableContext items={payrollList.filter((item: any) => item && item.teacher && item.teacher.id).map((item: any) => item.teacher.id)} strategy={verticalListSortingStrategy}>
+                            {payrollList.filter((item: any) => item && item.teacher && item.teacher.id).map((item: any) => {
+                              const { teacher, totalPeriods, baseLessonsSalary, currentBonusPeriods, bonusPeriodsDict, allowance, hasApprovedLeave, attendanceBonus, potentialBonus, artPerformanceBonus, socialInsurance, advanceSalary, deduction, finalWage } = item;
+                              return (
+                                <SortableReportRow 
+                                  key={teacher.id}
+                                  teacher={teacher}
+                                  totalPeriods={totalPeriods}
+                                  formatVND={formatVND}
+                                  baseLessonsSalary={baseLessonsSalary}
+                                  currentBonusPeriods={currentBonusPeriods}
+                                  onUpdateBonus={(val: number) => {
+                                    const newDict = { ...bonusPeriodsDict, [reportMonth]: val };
+                                    if (val === 0) delete newDict[reportMonth];
+                                    const updatedTeacher = { ...teacher, bonusPeriodsJSON: JSON.stringify(newDict) };
+                                    fetch('/api/teachers', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify(updatedTeacher)
+                                    }).then(() => {
+                                      onUpdateTeachers(teachers.map((t: any) => t.id === teacher.id ? updatedTeacher : t));
+                                    }).catch(console.error);
+                                  }}
+                                  allowance={allowance}
+                                  hasApprovedLeave={hasApprovedLeave}
+                                  attendanceBonus={attendanceBonus}
+                                  potentialBonus={potentialBonus}
+                                  artPerformanceBonus={artPerformanceBonus}
+                                  socialInsurance={socialInsurance}
+                                  advanceSalary={advanceSalary}
+                                  deduction={deduction}
+                                  finalWage={finalWage}
+                                  isAdmin={currentUser?.role === 'admin'}
+                                />
+                              );
+                            })}
+                          </SortableContext>
+                      </tbody>
+                      <tfoot className="bg-slate-900 text-white font-semibold">
+                        <tr>
+                          <td colSpan={2} className="p-3 text-left font-bold text-xs uppercase tracking-wider">
+                            TỔNG CỘNG ({payrollList.length} GV)
+                          </td>
+                          <td className="p-3 text-center font-mono font-bold text-blue-300">
+                            {totals.periods} tiết
+                          </td>
+                          <td className="p-3 text-right font-mono text-slate-400">-</td>
+                          <td className="p-3 text-center font-mono text-slate-400">-</td>
+                          <td className="p-3 text-right font-mono font-bold text-slate-100">
+                            {formatVND(totals.baseSalary)}
+                          </td>
+                          <td className="p-3 text-right font-mono font-bold text-emerald-300">
+                            {formatVND(totals.allowance)}
+                          </td>
+                          <td className="p-3 text-right font-mono font-bold text-emerald-300">
+                            {formatVND(totals.attendanceBonus)}
+                          </td>
+                          <td className="p-3 text-right font-mono text-rose-300">
+                            {totals.socialInsurance > 0 ? `-${formatVND(totals.socialInsurance)}` : '-'}
+                          </td>
+                          <td className="p-3 text-right font-mono text-amber-300">
+                            {totals.advanceSalary > 0 ? `-${formatVND(totals.advanceSalary)}` : '-'}
+                          </td>
+                          <td className="p-3 text-right font-mono text-rose-300">
+                            {totals.deduction > 0 ? `-${formatVND(totals.deduction)}` : '-'}
+                          </td>
+                          <td className="p-3 text-right font-mono font-extrabold text-base text-emerald-400 bg-slate-950 border-l border-slate-800">
+                            {formatVND(totals.finalWage)}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                    </DndContext>
+                  </div>
+                </React.Fragment>
+              );
+            })()}
 
             {/* School level summarized analytics panel */}
             <div className="pt-6 border-t border-slate-150 space-y-4">

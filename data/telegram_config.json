@@ -1,0 +1,84 @@
+{
+  "token": "8781098428:AAF4UGjjGO1tIfNubILrPjMatlYDn-QyQzo",
+  "chatId": "1656064780",
+  "username": "",
+  "botName": "",
+  "verificationCode": "889912",
+  "logs": [
+    {
+      "time": "00:37:31",
+      "sender": "@mrangk",
+      "message": "/start"
+    },
+    {
+      "time": "00:37:57",
+      "sender": "@mrangk",
+      "message": "/link 889912"
+    },
+    {
+      "time": "00:37:57",
+      "sender": "Hệ thống",
+      "message": "Tài khoản Telegram @mrangk (ChatID: 1656064780) đã liên kết thành công."
+    },
+    {
+      "time": "00:43:40",
+      "sender": "@mrangk",
+      "message": "chào m"
+    },
+    {
+      "time": "00:43:57",
+      "sender": "@mrangk",
+      "message": "bạn có biết nhiệm vụ của mình"
+    },
+    {
+      "time": "11:42:15",
+      "sender": "@mrangk",
+      "message": "tăng từ 110.000VNĐ/1 tiết lên 115.000VNĐ/1 tiết áp dụng từ 1/8/2026 này nhé đối tượng là các trường mầm non đang hợp tác"
+    },
+    {
+      "time": "11:43:02",
+      "sender": "@mrangk",
+      "message": "lí do thì cứ kiếm lí do gì hợp lý tí ghi vô"
+    },
+    {
+      "time": "11:43:42",
+      "sender": "@mrangk",
+      "message": "ko cần cứ làm đây là test"
+    },
+    {
+      "time": "11:44:59",
+      "sender": "@mrangk",
+      "message": "Soạn thử đi đừng hỏi nữa làm đẹp vào"
+    },
+    {
+      "time": "11:46:36",
+      "sender": "@mrangk",
+      "message": "Lam cái này chưa"
+    },
+    {
+      "time": "11:46:53",
+      "sender": "@mrangk",
+      "message": "Lam thông báo tăng giá nãy giờ không làm à"
+    },
+    {
+      "time": "12:10:32",
+      "sender": "@mrangk",
+      "message": "lưu cái thông báo tăng giá này ở đâu sao tao ko thấy"
+    },
+    {
+      "time": "18:26:30",
+      "sender": "@mrangk",
+      "message": "Bật UltraViewer rồi chụp màn hình gửi anh"
+    },
+    {
+      "time": "19:13:30",
+      "sender": "@mrangk",
+      "message": "Lấy thông tin khách hàng bên B của hợp đồng trường mầm non ABC gửi lên đây cho mình"
+    },
+    {
+      "time": "20:52:49",
+      "sender": "@mrangk",
+      "message": "Tắt UltraViewer giùm anh"
+    }
+  ]
+}

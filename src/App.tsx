@@ -48,10 +48,12 @@ let syncQueue = Promise.resolve();
 // ERROR BOUNDARY - Bẫy bắt mọi lỗi React, tránh màn hình trắng
 // ============================================================
 interface ErrorBoundaryState { hasError: boolean; error: Error | null; }
-export class ErrorBoundary extends Component<{children: React.ReactNode}, ErrorBoundaryState> {
+export class ErrorBoundary extends React.Component<{children: React.ReactNode}, ErrorBoundaryState> {
+  props: { children: React.ReactNode };
+  state: ErrorBoundaryState = { hasError: false, error: null };
   constructor(props: any) {
     super(props);
-    this.state = { hasError: false, error: null };
+    this.props = props;
   }
   static getDerivedStateFromError(error: Error) {
     return { hasError: true, error };
@@ -60,9 +62,14 @@ export class ErrorBoundary extends Component<{children: React.ReactNode}, ErrorB
     console.error('[ErrorBoundary]', error, info);
   }
   handleReset = () => {
-    try { localStorage.removeItem('etms_current_user'); } catch {}
+    try { localStorage.clear(); } catch {}
     try { sessionStorage.clear(); } catch {}
-    window.location.href = '/';
+    if ('caches' in window) {
+      caches.keys().then(names => {
+        names.forEach(name => caches.delete(name));
+      });
+    }
+    window.location.reload();
   };
   render() {
     if (this.state.hasError) {
@@ -72,7 +79,7 @@ export class ErrorBoundary extends Component<{children: React.ReactNode}, ErrorB
             <div style={{ fontSize: '48px', textAlign: 'center', marginBottom: '16px' }}>⚠️</div>
             <h2 style={{ color: '#b91c1c', fontSize: '18px', fontWeight: 'bold', marginBottom: '8px', textAlign: 'center' }}>Ứng dụng gặp sự cố</h2>
             <p style={{ color: '#64748b', fontSize: '14px', textAlign: 'center', marginBottom: '16px' }}>Đã xảy ra lỗi không mong muốn. Vui lòng bấm nút bên dưới để khởi động lại ứng dụng.</p>
-            <details style={{ marginBottom: '20px', background: '#fef2f2', borderRadius: '10px', padding: '12px', fontSize: '11px', color: '#991b1b' }}>
+            <details open style={{ marginBottom: '20px', background: '#fef2f2', borderRadius: '10px', padding: '12px', fontSize: '11px', color: '#991b1b' }}>
               <summary style={{ cursor: 'pointer', fontWeight: 'bold' }}>Chi tiết lỗi kỹ thuật</summary>
               <pre style={{ marginTop: '8px', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
                 {this.state.error?.message}{'\n'}{this.state.error?.stack}

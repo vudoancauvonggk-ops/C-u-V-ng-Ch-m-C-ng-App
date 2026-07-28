@@ -34,10 +34,13 @@ import {
 import { requireAuth, AuthRequest } from './src/middleware/auth.ts';
 import { getOrCreateUser } from './src/db/users.ts';
 
+import { officeRouter } from './server_office.ts';
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  app.use('/', officeRouter);
   app.use(express.json({ limit: '200mb' }));
 
   let requestsToday = 0;
@@ -527,6 +530,86 @@ async function startServer() {
     } catch (err: any) {
       console.error('Failed to restore database:', err);
       res.status(500).json({ error: 'Failed to restore database', details: err.message });
+    }
+  });
+
+  // API to archive Acceptance Document & Form 08a directly to D:\Aerobic\Hợp Đồng 2023-2026
+  app.post('/api/admin/save-acceptance-docs', async (req, res) => {
+    try {
+      const { schoolName, reportMonth, acceptanceBase64, form08aBase64, acceptanceText, files } = req.body;
+      
+      const sanitizeFilename = (name: string) => (name || 'Truong').replace(/[\\/:*?"<>|]/g, '_').trim();
+      const safeSchoolName = sanitizeFilename(schoolName);
+      const safeMonth = (reportMonth || '2026-07').trim();
+
+      // Check target base path: D:\Aerobic\Hợp Đồng 2023-2026
+      let targetBasePath = 'D:\\Aerobic\\Hợp Đồng 2023-2026';
+      if (!fs.existsSync('D:\\Aerobic')) {
+        targetBasePath = path.join(process.cwd(), 'saved_acceptance_docs');
+      }
+
+      // School subfolder: D:\Aerobic\Hợp Đồng 2023-2026\Bảng Nghiệm Thu & 8a\[Tên_Trường]\
+      const schoolDir = path.join(targetBasePath, 'Bảng Nghiệm Thu & 8a', safeSchoolName);
+      const monthDir = path.join(targetBasePath, 'Bảng Nghiệm Thu & 8a', `Tháng ${safeMonth}`);
+
+      fs.mkdirSync(schoolDir, { recursive: true });
+      fs.mkdirSync(monthDir, { recursive: true });
+
+      const savedPaths: string[] = [];
+
+      // Save files array if provided
+      if (Array.isArray(files)) {
+        for (const file of files) {
+          if (file.filename && file.base64) {
+            const buf = Buffer.from(file.base64, 'base64');
+            const file1 = path.join(schoolDir, file.filename);
+            const file2 = path.join(monthDir, `${safeSchoolName}_${file.filename}`);
+            fs.writeFileSync(file1, buf);
+            fs.writeFileSync(file2, buf);
+            savedPaths.push(file1);
+          }
+        }
+      }
+
+      // Save acceptance docx
+      if (acceptanceBase64) {
+        const name1 = `BBNT_Thang_${safeMonth}_${safeSchoolName}.docx`;
+        const buf = Buffer.from(acceptanceBase64, 'base64');
+        const p1 = path.join(schoolDir, name1);
+        const p2 = path.join(monthDir, name1);
+        fs.writeFileSync(p1, buf);
+        fs.writeFileSync(p2, buf);
+        savedPaths.push(p1);
+      }
+
+      // Save Form 08a docx
+      if (form08aBase64) {
+        const name2 = `Mau08a_Thang_${safeMonth}_${safeSchoolName}.docx`;
+        const buf = Buffer.from(form08aBase64, 'base64');
+        const p1 = path.join(schoolDir, name2);
+        const p2 = path.join(monthDir, name2);
+        fs.writeFileSync(p1, buf);
+        fs.writeFileSync(p2, buf);
+        savedPaths.push(p1);
+      }
+
+      // Save raw text file
+      if (acceptanceText) {
+        const name3 = `BBNT_Thang_${safeMonth}_${safeSchoolName}.txt`;
+        const p1 = path.join(schoolDir, name3);
+        fs.writeFileSync(p1, acceptanceText, 'utf-8');
+        savedPaths.push(p1);
+      }
+
+      res.json({
+        status: 'success',
+        message: `Đã lưu thành công vào D:\\Aerobic\\Hợp Đồng 2023-2026\\Bảng Nghiệm Thu & 8a\\${safeSchoolName}\\`,
+        savedPaths,
+        targetDir: schoolDir
+      });
+    } catch (err: any) {
+      console.error('Failed to save acceptance docs:', err);
+      res.status(500).json({ error: 'Failed to save acceptance docs', details: err.message });
     }
   });
 

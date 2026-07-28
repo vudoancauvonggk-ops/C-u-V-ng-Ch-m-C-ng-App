@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Lock, Eye, EyeOff, Search, FileSpreadsheet, Copy, Check, AlertTriangle, 
-  Sparkles, CheckCircle2, DollarSign, Calendar, Save, RefreshCw, Clock, Trash2, Plus, CopyPlus
+  Sparkles, CheckCircle2, DollarSign, Calendar, Save, RefreshCw, Clock, Trash2, Plus, CopyPlus, TrendingUp, FileText
 } from 'lucide-react';
 import { School, ClassInfo, AttendanceLog, Schedule, Teacher } from '../types';
+import AcceptanceModal from './AcceptanceModal';
 
 interface SchoolPayrollTabProps {
   schools: School[];
@@ -18,6 +19,7 @@ interface SchoolPayrollTabProps {
   onUpdateSchedules: (schedules: Schedule[]) => void;
   onUpdateAttendance: (attendance: AttendanceLog[]) => void;
   teachers: Teacher[];
+  changeRequests?: any[];
 }
 
 export interface PayrollRowState {
@@ -42,7 +44,8 @@ export default function SchoolPayrollTab({
   onUpdateClasses,
   onUpdateSchedules,
   onUpdateAttendance,
-  teachers
+  teachers,
+  changeRequests
 }: SchoolPayrollTabProps) {
   // Authentication & Verification (cached in sessionStorage to prevent re-entering on tab switches)
   const [isAdminVerified, setIsAdminVerified] = useState(() => {
@@ -75,6 +78,10 @@ export default function SchoolPayrollTab({
   const [copiedSchoolId, setCopiedSchoolId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error' | null>(null);
+
+  // State for Acceptance Modal
+  const [selectedAcceptanceRow, setSelectedAcceptanceRow] = useState<any | null>(null);
+  const [isAcceptanceModalOpen, setIsAcceptanceModalOpen] = useState(false);
 
   // Directly save a school's rate, invoice status, and class count to the DB
   const handleSaveSchoolRate = async (schoolId: string, tuitionRate: string, isInvoice: boolean, classesCount: number) => {
@@ -428,6 +435,153 @@ export default function SchoolPayrollTab({
   const totalPayrollValue = calculatedRows.reduce((acc, curr) => acc + curr.calculatedAmount, 0);
   const totalActualPeriods = calculatedRows.reduce((acc, curr) => acc + (curr.actualPeriods || 0), 0);
 
+  const invoiceRows = calculatedRows.filter(r => r.isInvoice);
+  const personalRows = calculatedRows.filter(r => !r.isInvoice);
+  const totalInvoiceAmount = invoiceRows.reduce((acc, curr) => acc + curr.calculatedAmount, 0);
+  const totalPersonalAmount = personalRows.reduce((acc, curr) => acc + curr.calculatedAmount, 0);
+
+  // State for company BHXH contribution (defaults to 23,000,000 VNĐ, persists in localStorage)
+  const [companyBhxh, setCompanyBhxh] = useState<number>(() => {
+    const monthKey = localStorage.getItem(`etms_company_bhxh_${reportMonth}`);
+    if (monthKey) return parseInt(monthKey, 10);
+    const defaultKey = localStorage.getItem('etms_company_bhxh_default');
+    if (defaultKey) return parseInt(defaultKey, 10);
+    return 23000000;
+  });
+
+  useEffect(() => {
+    const monthKey = localStorage.getItem(`etms_company_bhxh_${reportMonth}`);
+    if (monthKey) {
+      setCompanyBhxh(parseInt(monthKey, 10));
+    } else {
+      const defaultKey = localStorage.getItem('etms_company_bhxh_default');
+      if (defaultKey) setCompanyBhxh(parseInt(defaultKey, 10));
+    }
+  }, [reportMonth]);
+
+  const handleUpdateBhxh = () => {
+    const currentInMillions = (companyBhxh / 1000000).toString();
+    const input = window.prompt(
+      `TINH CHỈNH MỨC BHXH CÔNG TY ĐÓNG (${reportMonth}):\n\n- Nhập số triệu (ví dụ: 23 = 23 triệu, 25.5 = 25,5 triệu)\n- Hoặc nhập đầy đủ số tiền (ví dụ: 23000000):`,
+      currentInMillions
+    );
+    if (input !== null && input.trim() !== '') {
+      const raw = input.trim().replace(',', '.');
+      const num = parseFloat(raw);
+      if (!isNaN(num) && num >= 0) {
+        let finalAmount = num;
+        if (num < 1000) {
+          finalAmount = Math.round(num * 1000000);
+        }
+        setCompanyBhxh(finalAmount);
+        localStorage.setItem(`etms_company_bhxh_${reportMonth}`, String(finalAmount));
+        localStorage.setItem('etms_company_bhxh_default', String(finalAmount));
+      }
+    }
+  };
+
+  // Calculate total teacher salary for reportMonth across all active teachers
+  const totalTeacherSalary = (teachers || []).reduce((sum, teacher) => {
+    if (!teacher || teacher.isDeleted) return sum;
+    
+    const tLogs = (attendance || []).filter((a: any) => 
+      a && a.teacherId === teacher.id && 
+      a.date && typeof a.date === 'string' && 
+      a.date.startsWith(reportMonth) && 
+      (a.confirmedByAdmin || a.isVerified)
+    );
+
+    const substituteLogs = tLogs.filter((log: any) => {
+      const sched = (schedules || []).find((s: any) => s && !s.isDeleted && s.id === log.scheduleId);
+      return sched && sched.teacherId !== teacher.id;
+    });
+    const regularLogs = tLogs.filter((log: any) => {
+      const sched = (schedules || []).find((s: any) => s && !s.isDeleted && s.id === log.scheduleId);
+      return !sched || sched.teacherId === teacher.id;
+    });
+
+    const getSessionType = (s: string) => {
+      if (!s) return 'morning';
+      const lower = String(s || '').toLowerCase();
+      if (lower.includes('chieu') || lower.includes('chiều') || lower.includes('afternoon')) return 'afternoon';
+      return 'morning';
+    };
+
+    const adjustPeriods = (logs: any[]) => {
+      const groups: Record<string, any[]> = {};
+      logs.forEach((l: any) => {
+        if (!l || !l.date) return;
+        const key = l.date + '_' + getSessionType(l.session);
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(l);
+      });
+      let total = 0;
+      Object.values(groups).forEach(group => {
+        let groupSum = group.reduce((acc: number, curr: any) => acc + (Number(curr?.periods) || 1), 0);
+        if (groupSum === 1) groupSum = 2;
+        else if (groupSum === 2) groupSum = 2.5;
+        total += groupSum;
+      });
+      return total;
+    };
+
+    const regularPeriods = adjustPeriods(regularLogs);
+    const substitutePeriods = adjustPeriods(substituteLogs);
+
+    let bonusPeriodsDict: Record<string, number> = {};
+    try {
+      if (teacher.bonusPeriodsJSON) {
+        bonusPeriodsDict = JSON.parse(teacher.bonusPeriodsJSON);
+      }
+    } catch(e) {}
+    const currentBonusPeriods = Number(bonusPeriodsDict[reportMonth]) || 0;
+
+    const schoolClosedArrivedPeriods = (schoolCancellations || []).filter((c: any) => 
+      c && c.teacherId === teacher.id && 
+      c.date && typeof c.date === 'string' && 
+      c.date.startsWith(reportMonth) && 
+      c.cancellationType === 'arrived'
+    ).length;
+
+    const hourlyRate = Number(teacher.hourlyRate) || 0;
+    const baseLessonsSalary = (regularPeriods + currentBonusPeriods + schoolClosedArrivedPeriods) * hourlyRate + substitutePeriods * 55000;
+
+    const hasApprovedLeave = (changeRequests || []).some((c: any) => 
+      c && c.teacherId === teacher.id && 
+      c.status === 'approved' && 
+      c.date && typeof c.date === 'string' && 
+      c.date.startsWith(reportMonth) && 
+      (c.requestType === 'sick_leave' || c.requestType === 'substitute_teacher')
+    );
+    
+    const artEvents = (changeRequests || []).filter((c: any) => 
+      c && c.teacherId === teacher.id && 
+      c.status === 'approved' && 
+      c.date && typeof c.date === 'string' && 
+      c.date.startsWith(reportMonth) && 
+      c.requestType === 'art_performance'
+    );
+    let artPerformanceBonus = 0;
+    artEvents.forEach((c: any) => {
+      const match = ((c && c.reason) || '').match(/\[Số lượng: (\d+)\]/);
+      if (match) artPerformanceBonus += parseInt(match[1]) * 100000;
+      else artPerformanceBonus += 100000;
+    });
+
+    const allowance = Number(teacher.monthlyAllowance) || 500000;
+    const potentialBonus = Number(teacher.bonus) || 300000;
+    const attendanceBonus = (hasApprovedLeave ? 0 : potentialBonus) + artPerformanceBonus;
+    const socialInsurance = Number(teacher.socialInsurance) || 0;
+    const advanceSalary = Number(teacher.advanceSalary) || 0;
+    const deduction = Number(teacher.deduction) || 0;
+
+    const finalWage = baseLessonsSalary + allowance + attendanceBonus - deduction - socialInsurance - advanceSalary;
+    return sum + finalWage;
+  }, 0);
+
+  // Profit formula: Total Tuition Collectible - Teacher Salary - BHXH
+  const estimatedProfit = totalPayrollValue - totalTeacherSalary - companyBhxh;
+
   // Copy notification message
   const handleCopyMessage = (row: typeof calculatedRows[0]) => {
     const monthNum = parseInt(reportMonth.split('-')[1]);
@@ -549,50 +703,107 @@ export default function SchoolPayrollTab({
         </div>
       </div>
       {/* SUMMARY DASHBOARD CARDS */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="bg-gradient-to-tr from-blue-600 to-indigo-700 text-white rounded-3xl p-6 shadow-lg relative overflow-hidden">
-          <div className="absolute right-4 top-4 opacity-10">
-            <DollarSign className="h-24 w-24" />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        {/* Card 1: Tổng Học Phí Phải Thu */}
+        <div className="bg-gradient-to-tr from-blue-600 to-indigo-700 text-white rounded-3xl p-5 shadow-lg relative overflow-hidden flex flex-col justify-between">
+          <div className="absolute right-3 top-3 opacity-10">
+            <DollarSign className="h-20 w-20" />
           </div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-blue-100">Tổng Học Phí Phải Thu ({reportMonth})</p>
-          <p className="text-3xl font-extrabold mt-2 font-mono">{formatVND(totalPayrollValue)}</p>
-          <div className="mt-4 flex items-center gap-1.5 text-xs text-blue-100 bg-white/10 px-3 py-1 rounded-xl w-max">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-blue-100">Tổng Học Phí Phải Thu ({reportMonth})</p>
+            <p className="text-2xl font-extrabold mt-1.5 font-mono">{formatVND(totalPayrollValue)}</p>
+          </div>
+          <div className="mt-3 flex items-center gap-1.5 text-xs text-blue-100 bg-white/10 px-3 py-1 rounded-xl w-max">
             <CheckCircle2 className="h-3.5 w-3.5" /> Đối soát {sortedRows.length} trường
           </div>
         </div>
 
-        <div className="bg-white border border-slate-100 rounded-3xl p-6 shadow-sm flex items-center justify-between">
-          <div className="space-y-1">
-            <p className="text-slate-400 text-xs font-semibold uppercase tracking-wider">Hóa Đơn Cần Xuất</p>
-            <p className="text-2xl font-bold text-slate-800 font-mono">
-              {calculatedRows.filter(r => r.isInvoice).length} <span className="text-xs text-slate-400 font-normal">trường</span>
+        {/* Card 2: Lợi Nhuận Tạm Tính */}
+        <div className="bg-gradient-to-tr from-purple-700 via-indigo-800 to-slate-900 text-white rounded-3xl p-5 shadow-lg relative overflow-hidden flex flex-col justify-between">
+          <div className="absolute right-3 top-3 opacity-10">
+            <TrendingUp className="h-20 w-20" />
+          </div>
+          <div>
+            <div className="flex items-center justify-between gap-1">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-purple-200">Lợi Nhuận Tạm Tính ({reportMonth})</p>
+              <button 
+                onClick={handleUpdateBhxh}
+                className="text-[9.5px] bg-white/15 hover:bg-white/30 text-purple-100 px-2 py-0.5 rounded-full font-semibold transition cursor-pointer shrink-0 border border-white/10 flex items-center gap-1 active:scale-95"
+                title="Bấm để chỉnh sửa số tiền BHXH công ty đóng"
+              >
+                <span>BHXH: {formatVND(companyBhxh)}</span>
+                <span className="text-[10px]">✏️</span>
+              </button>
+            </div>
+            <p className={`text-2xl font-extrabold mt-1.5 font-mono ${estimatedProfit < 0 ? 'text-rose-300' : 'text-emerald-300'}`}>
+              {formatVND(estimatedProfit)}
             </p>
           </div>
-          <div className="p-3 bg-amber-50 text-amber-500 border border-amber-100 rounded-2xl font-bold text-xs uppercase">
+          <div className="mt-3 pt-2 border-t border-white/10 space-y-0.5 text-[10.5px] text-purple-100/90 font-sans">
+            <div className="flex justify-between">
+              <span>Học phí phải thu:</span>
+              <span className="font-mono font-semibold text-white">{formatVND(totalPayrollValue)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>- Lương giáo viên:</span>
+              <span className="font-mono font-semibold text-amber-200">-{formatVND(totalTeacherSalary)}</span>
+            </div>
+            <div 
+              onClick={handleUpdateBhxh}
+              className="flex justify-between items-center cursor-pointer hover:bg-white/10 px-1 rounded transition group"
+              title="Bấm vào đây để chỉnh sửa mức BHXH công ty đóng"
+            >
+              <span className="flex items-center gap-1">
+                <span>- BHXH công ty:</span>
+                <span className="text-[9px] text-purple-200/60 group-hover:text-purple-100 transition">✏️</span>
+              </span>
+              <span className="font-mono font-semibold text-rose-200 group-hover:underline">-{formatVND(companyBhxh)}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Card 3: Hóa Đơn Cần Xuất */}
+        <div className="bg-white border border-slate-100 rounded-3xl p-5 shadow-sm flex flex-col justify-between">
+          <div className="space-y-1">
+            <p className="text-slate-400 text-xs font-semibold uppercase tracking-wider">Hóa Đơn Cần Xuất</p>
+            <p className="text-xl font-extrabold text-amber-600 font-mono tracking-tight">
+              {formatVND(totalInvoiceAmount)}
+            </p>
+            <p className="text-xs text-slate-500 font-medium">
+              <span className="font-bold text-slate-700 font-mono">{invoiceRows.length}</span> trường xuất hóa đơn
+            </p>
+          </div>
+          <div className="mt-3 w-max px-3 py-1.5 bg-amber-50 text-amber-600 border border-amber-100 rounded-2xl font-bold text-xs uppercase">
             Hóa đơn đỏ
           </div>
         </div>
 
-        <div className="bg-white border border-slate-100 rounded-3xl p-6 shadow-sm flex items-center justify-between">
+        {/* Card 4: Thanh toán cá nhân */}
+        <div className="bg-white border border-slate-100 rounded-3xl p-5 shadow-sm flex flex-col justify-between">
           <div className="space-y-1">
             <p className="text-slate-400 text-xs font-semibold uppercase tracking-wider">Thanh toán cá nhân</p>
-            <p className="text-2xl font-bold text-slate-800 font-mono">
-              {calculatedRows.filter(r => !r.isInvoice).length} <span className="text-xs text-slate-400 font-normal">trường</span>
+            <p className="text-xl font-extrabold text-emerald-600 font-mono tracking-tight">
+              {formatVND(totalPersonalAmount)}
+            </p>
+            <p className="text-xs text-slate-500 font-medium">
+              <span className="font-bold text-slate-700 font-mono">{personalRows.length}</span> trường cá nhân
             </p>
           </div>
-          <div className="p-3 bg-emerald-50 text-emerald-500 border border-emerald-100 rounded-2xl font-bold text-xs uppercase">
+          <div className="mt-3 w-max px-3 py-1.5 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-2xl font-bold text-xs uppercase">
             Tiền mặt/Cá nhân
           </div>
         </div>
 
-        {/* Tổng số tiết đã dạy */}
-        <div className="bg-gradient-to-tr from-green-600 to-teal-700 text-white rounded-3xl p-6 shadow-lg relative overflow-hidden">
-          <div className="absolute right-4 top-4 opacity-10">
-            <Clock className="h-24 w-24" />
+        {/* Card 5: Tổng số tiết đã dạy */}
+        <div className="bg-gradient-to-tr from-green-600 to-teal-700 text-white rounded-3xl p-5 shadow-lg relative overflow-hidden flex flex-col justify-between">
+          <div className="absolute right-3 top-3 opacity-10">
+            <Clock className="h-20 w-20" />
           </div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-green-100">Tổng số tiết đã dạy ({reportMonth})</p>
-          <p className="text-3xl font-extrabold mt-2 font-mono">{totalActualPeriods.toLocaleString()} <span className="text-sm font-normal text-green-200">tiết</span></p>
-          <div className="mt-4 flex items-center gap-1.5 text-xs text-green-100 bg-white/10 px-3 py-1 rounded-xl w-max">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-green-100">Tổng số tiết đã dạy ({reportMonth})</p>
+            <p className="text-2xl font-extrabold mt-1.5 font-mono">{totalActualPeriods.toLocaleString()} <span className="text-xs font-normal text-green-200">tiết</span></p>
+          </div>
+          <div className="mt-3 flex items-center gap-1.5 text-xs text-green-100 bg-white/10 px-3 py-1 rounded-xl w-max">
             <CheckCircle2 className="h-3.5 w-3.5" /> {calculatedRows.length} trường
           </div>
         </div>
@@ -706,26 +917,40 @@ export default function SchoolPayrollTab({
                       </div>
                     </td>
                     <td className="p-4 text-center">
-                      <button
-                        onClick={() => handleCopyMessage(row)}
-                        className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition mx-auto border cursor-pointer active:scale-95 ${
-                          copiedSchoolId === row.rowId
-                            ? 'bg-emerald-500 text-white border-emerald-500 shadow-md'
-                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                        }`}
-                      >
-                        {copiedSchoolId === row.rowId ? (
-                          <>
-                            <Check className="h-3.5 w-3.5" />
-                            Đã chép
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="h-3.5 w-3.5 text-slate-400" />
-                            Lấy mẫu tin
-                          </>
-                        )}
-                      </button>
+                      <div className="flex items-center justify-center gap-2">
+                        <button
+                          onClick={() => handleCopyMessage(row)}
+                          className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer active:scale-95 ${
+                            copiedSchoolId === row.rowId
+                              ? 'bg-emerald-500 text-white border-emerald-500 shadow-md'
+                              : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          {copiedSchoolId === row.rowId ? (
+                            <>
+                              <Check className="h-3.5 w-3.5" />
+                              Đã chép
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="h-3.5 w-3.5 text-slate-400" />
+                              Lấy mẫu tin
+                            </>
+                          )}
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setSelectedAcceptanceRow(row);
+                            setIsAcceptanceModalOpen(true);
+                          }}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-600 hover:text-white hover:border-indigo-600 transition cursor-pointer active:scale-95 shadow-sm"
+                          title="Tạo & Tải file Word (.docx) Bảng Nghiệm Thu / Mẫu 8a"
+                        >
+                          <FileText className="h-3.5 w-3.5" />
+                          <span>Lấy Bảng Nghiệm Thu</span>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -843,6 +1068,36 @@ export default function SchoolPayrollTab({
             </div>
           </div>
         </div>
+      )}
+
+      {/* ACCEPTANCE & FORM 08a MODAL */}
+      {isAcceptanceModalOpen && selectedAcceptanceRow && (
+        <AcceptanceModal
+          isOpen={isAcceptanceModalOpen}
+          onClose={() => {
+            setIsAcceptanceModalOpen(false);
+            setSelectedAcceptanceRow(null);
+          }}
+          school={selectedAcceptanceRow.dbSchool || {
+            id: selectedAcceptanceRow.schoolId,
+            name: selectedAcceptanceRow.displayName,
+            address: '',
+            phone: '',
+            contactPerson: ''
+          }}
+          allSchools={schools}
+          calculatedRows={calculatedRows}
+          classes={classes}
+          attendance={attendance}
+          reportMonth={reportMonth}
+          unitPrice={selectedAcceptanceRow.unitPrice}
+          isPerPeriod={selectedAcceptanceRow.isPerPeriod}
+          rawHourlyRate={selectedAcceptanceRow.rawHourlyRate}
+          totalCalculatedAmount={selectedAcceptanceRow.calculatedAmount}
+          actualPeriods={selectedAcceptanceRow.actualPeriods}
+          onAddAuditLog={onAddAuditLog}
+          currentUser={currentUser}
+        />
       )}
     </div>
   );

@@ -1,0 +1,99 @@
+{
+  "lastUpdated": "27/07/2026",
+  "groups": [
+    {
+      "title": "Chính sách Thuế mới cho doanh nghiệp nhỏ và siêu nhỏ",
+      "items": [
+        {
+          "id": "thue_tndn_uu_dai",
+          "title": "1. Thuế suất Thu nhập Doanh nghiệp (TNDN) ưu đãi",
+          "content": "Từ năm 2026, doanh nghiệp có tổng doanh thu năm trước liền kề không quá 3 tỷ đồng sẽ được áp dụng thuế suất TNDN là 15%. Doanh nghiệp có tổng doanh thu năm trước liền kề từ trên 3 tỷ đồng đến không quá 50 tỷ đồng được áp dụng thuế suất 17%. Thuế suất phổ thông là 20%.\n\nDoanh nghiệp siêu nhỏ có tổng doanh thu năm không quá 3 tỷ đồng, nếu không tự xác định được chi phí và thu nhập thực tế, có quyền kê khai và nộp thuế TNDN theo tỷ lệ phần trăm trực tiếp trên doanh thu. Mức thuế suất cụ thể: lĩnh vực phân phối, cung cấp hàng hóa là 0,3%; sản xuất, vận tải, dịch vụ có gắn với hàng hóa, xây dựng có bao thầu nguyên vật liệu là 1,2%; dịch vụ (bao gồm cả dịch vụ khác) là 1,2%.",
+          "effectiveDate": "Từ năm tài chính 2026 (Nghị định 320/2025/NĐ-CP)",
+          "action": "Doanh nghiệp cần rà soát tổng doanh thu năm trước liền kề để xác định mức thuế suất TNDN áp dụng cho năm 2026. Nếu thuộc diện không xác định được chi phí thực tế, có thể lựa chọn phương pháp tính thuế trực tiếp trên doanh thu."
+        },
+        {
+          "id": "mien_thue_tndn_doanh_nghiep_moi",
+          "title": "2. Miễn thuế TNDN cho doanh nghiệp nhỏ và vừa mới thành lập",
+          "content": "Doanh nghiệp nhỏ và vừa mới thành lập sẽ được miễn thuế TNDN trong 3 năm kể từ ngày được cấp Giấy chứng nhận đăng ký doanh nghiệp lần đầu.\n\nĐặc biệt, doanh nghiệp có tổng doanh thu năm từ 01 tỷ đồng trở xuống sẽ được miễn thuế TNDN.",
+          "effectiveDate": "Từ 15/01/2026 (Nghị định 20/2026/NĐ-CP hướng dẫn Nghị quyết 198/2025/QH15) và từ 29/04/2026 (Nghị định 141/2026/NĐ-CP sửa đổi, bổ sung Nghị định 320/2025/NĐ-CP)",
+          "action": "Các doanh nghiệp mới thành lập cần nắm rõ quy định này để được hưởng ưu đãi miễn thuế trong 3 năm đầu. Đồng thời, theo dõi doanh thu để biết có thuộc diện miễn thuế TNDN cho doanh nghiệp có doanh thu dưới 1 tỷ đồng hay không."
+        },
+        {
+          "id": "giam_thue_gtgt",
+          "title": "3. Giảm thuế Giá trị gia tăng (GTGT)",
+          "content": "Mức thuế suất GTGT đối với các nhóm hàng hóa, dịch vụ đang áp dụng mức 10% được giảm xuống còn 8%.",
+          "effectiveDate": "Từ 01/07/2025 đến hết 31/12/2026",
+          "action": "Doanh nghiệp cần áp dụng mức thuế suất 8% cho các hàng hóa, dịch vụ thuộc đối tượng được giảm thuế trong thời gian quy định."
+        },
+        {
+          "id": "bo_le_phi_mon_bai",
+          "title": "4. Bãi bỏ Lệ phí môn bài",
+          "content": "Từ ngày 01/01/2026, lệ phí môn bài sẽ chấm dứt thu hoàn toàn đối với tất cả các đối tượng.",
+          "effectiveDate": "Từ 01/01/2026",
+          "action": "Doanh nghiệp không cần thực hiện nghĩa vụ nộp lệ phí môn bài từ năm 2026."
+        },
+        {
+          "id": "che_do_ke_toan_dn_sieu_nho",
+          "title": "5. Chế độ kế toán đơn giản cho doanh nghiệp siêu nhỏ",
+          "content": "Thông tư 58/2026/TT-BTC hướng dẫn chế độ kế toán cho doanh nghiệp siêu nhỏ có hiệu lực từ ngày 01/07/2026. Theo đó, doanh nghiệp siêu nhỏ nộp thuế TNDN theo tỷ lệ phần trăm trên doanh thu bán hàng hóa, dịch vụ sẽ không bắt buộc phải lập báo cáo tài chính để nộp cho cơ quan nhà nước có thẩm quyền. Doanh nghiệp vẫn lập báo cáo tài chính nếu lựa chọn áp dụng các chế độ kế toán này, nhưng chỉ cần bảo quản, lưu trữ tại doanh nghiệp và cung cấp khi cơ quan có thẩm quyền yêu cầu.",
+          "effectiveDate": "Từ 01/07/2026 (Thông tư 58/2026/TT-BTC)",
+          "action": "Doanh nghiệp siêu nhỏ cần nghiên cứu Thông tư 58/2026/TT-BTC để áp dụng chế độ kế toán phù hợp, giảm gánh nặng về báo cáo tài chính nếu đủ điều kiện."
+        },
+        {
+          "id": "bo_thue_khoan_ho_kinh_doanh",
+          "title": "6. Bỏ thuế khoán đối với hộ kinh doanh và khuyến khích chuyển đổi",
+          "content": "Từ ngày 01/01/2026, hình thức thuế khoán đối với hộ kinh doanh sẽ bị xóa bỏ hoàn toàn. Đồng thời, Nhà nước khuyến khích và tạo điều kiện thuận lợi về tổ chức quản trị, chế độ tài chính, kế toán để hộ kinh doanh chuyển đổi thành doanh nghiệp.",
+          "effectiveDate": "Từ 01/01/2026",
+          "action": "Các hộ kinh doanh cần chủ động tìm hiểu và cân nhắc việc chuyển đổi lên mô hình doanh nghiệp để hưởng các chính sách hỗ trợ và ưu đãi."
+        }
+      ]
+    },
+    {
+      "title": "Quy định Lao động & Bảo hiểm xã hội mới nhất",
+      "items": [
+        {
+          "id": "tang_luong_toi_thieu_vung_2026",
+          "title": "1. Tăng mức lương tối thiểu vùng năm 2026",
+          "content": "Từ ngày 01/01/2026, mức lương tối thiểu vùng được điều chỉnh tăng theo Nghị định 293/2025/NĐ-CP. Mức tăng dao động từ 250.000 - 350.000 đồng/tháng.\n\nMức lương tối thiểu tháng cụ thể như sau: Vùng I: 5.310.000 đồng/tháng; Vùng II: 4.730.000 đồng/tháng; Vùng III: 4.140.000 đồng/tháng; Vùng IV: 3.700.000 đồng/tháng.\n\nMức lương tối thiểu giờ cụ thể như sau: Vùng I: 25.500 đồng/giờ; Vùng II: 22.700 đồng/giờ; Vùng III: 20.000 đồng/giờ; Vùng IV: 17.800 đồng/giờ.\n\nĐây là mức sàn pháp lý cho tiền lương theo công việc hoặc chức danh ghi trong hợp đồng lao động.",
+          "effectiveDate": "Từ 01/01/2026 (Nghị định 293/2025/NĐ-CP)",
+          "action": "Doanh nghiệp cần rà soát lại mức lương của người lao động để đảm bảo không thấp hơn mức lương tối thiểu vùng mới áp dụng từ đầu năm 2026. Cập nhật thang bảng lương nếu cần thiết."
+        },
+        {
+          "id": "ty_le_dong_bhxh_2026",
+          "title": "2. Tỷ lệ đóng Bảo hiểm xã hội (BHXH), Bảo hiểm y tế (BHYT), Bảo hiểm thất nghiệp (BHTN)",
+          "content": "Tổng tỷ lệ đóng BHXH, BHYT, BHTN cho người lao động Việt Nam trong năm 2026 là 32%. Trong đó, người sử dụng lao động đóng 21,5% (gồm 14% quỹ hưu trí và tử tuất; 3% quỹ ốm đau và thai sản; 0,5% quỹ tai nạn lao động - bệnh nghề nghiệp; 1% BHTN; 3% BHYT). Người lao động đóng 10,5% (gồm 8% quỹ hưu trí và tử tuất; 1% BHTN; 1,5% BHYT).",
+          "effectiveDate": "Áp dụng cho năm 2026 (căn cứ Luật BHXH 2024, Nghị định 58/2020/NĐ-CP, Quyết định 595/QĐ-BHXH)",
+          "action": "Doanh nghiệp cần tính toán và thực hiện đúng nghĩa vụ đóng các loại bảo hiểm theo tỷ lệ mới, đảm bảo quyền lợi cho người lao động."
+        },
+        {
+          "id": "muc_luong_co_so_anh_huong_bh",
+          "title": "3. Mức lương cơ sở và ảnh hưởng đến BHXH, BHYT",
+          "content": "Từ ngày 01/07/2026, mức lương cơ sở được điều chỉnh tăng từ 2,34 triệu đồng lên 2,53 triệu đồng/tháng. Sự điều chỉnh này làm thay đổi nhiều chế độ, chính sách BHXH, BHYT được xác định trên cơ sở mức lương cơ sở, bao gồm cả mức đóng và mức hưởng.",
+          "effectiveDate": "Từ 01/07/2026 (Nghị định 161/2026/NĐ-CP)",
+          "action": "Kế toán và bộ phận nhân sự cần lưu ý mức lương cơ sở mới để tính toán chính xác mức đóng BHXH, BHYT và các chế độ liên quan từ tháng 7/2026."
+        },
+        {
+          "id": "chinh_sach_bhyt_moi",
+          "title": "4. Chính sách BHYT mới",
+          "content": "Từ ngày 01/07/2026, có nhiều quy định mới về BHYT:\n- **Mở rộng quyền lợi khám BHYT ngoại trú:** Người tham gia BHYT khi tự đi khám, chữa bệnh ngoại trú tại cơ sở khám, chữa bệnh cấp cơ bản sẽ được quỹ BHYT thanh toán từ 50% đến 100% mức hưởng theo lộ trình và phân cấp chuyên môn kỹ thuật.\n- **Khám BHYT chi phí thấp được hưởng 100%:** Người bệnh sẽ được BHYT thanh toán 100% chi phí khám, chữa bệnh nếu chi phí cho một lần khám thấp hơn 15% mức lương cơ sở (tức là dưới 379.500 đồng với mức lương cơ sở mới).\n- **Giới hạn thanh toán thiết bị y tế:** Quỹ BHYT thanh toán tổng chi phí thiết bị y tế cho một lần sử dụng dịch vụ kỹ thuật không vượt quá 45 tháng lương cơ sở (tương đương 113,85 triệu đồng với mức lương cơ sở mới).",
+          "effectiveDate": "Từ 01/07/2026 (Luật BHYT, Nghị định 188/2025/NĐ-CP, Nghị định 161/2026/NĐ-CP)",
+          "action": "Doanh nghiệp cần thông báo cho người lao động về các thay đổi trong quyền lợi BHYT để họ nắm bắt và sử dụng hiệu quả hơn khi đi khám chữa bệnh. Đảm bảo việc đóng BHYT đầy đủ và đúng hạn."
+        },
+        {
+          "id": "quy_dinh_bhtn_moi",
+          "title": "5. Quy định mới về Bảo hiểm thất nghiệp (BHTN)",
+          "content": "Từ ngày 01/01/2026, Luật Việc làm 2025 mở rộng đối tượng tham gia BHTN, bao gồm cả người lao động làm việc theo hợp đồng từ 1 tháng trở lên, lao động không trọn thời gian có tiền lương bằng hoặc cao hơn tiền lương đóng BHXH bắt buộc thấp nhất, và người quản lý doanh nghiệp có hưởng lương.\n\nĐiều kiện hưởng trợ cấp thất nghiệp từ 2026 bao gồm: chấm dứt hợp đồng lao động đúng luật, đủ thời gian đóng BHTN (12 tháng trong 24 tháng trước khi nghỉ việc đối với hợp đồng không xác định thời hạn/xác định thời hạn, hoặc 12 tháng trong 36 tháng đối với hợp đồng từ 1 tháng đến dưới 12 tháng), nộp hồ sơ trong 03 tháng kể từ ngày chấm dứt hợp đồng, và không có việc làm/thuộc các trường hợp đặc biệt khác trong 10 ngày làm việc sau khi nộp hồ sơ.\n\nTrong trường hợp người sử dụng lao động không đóng đủ BHTN cho người lao động, phải trả khoản tiền tương ứng với các chế độ BHTN mà người lao động được hưởng.",
+          "effectiveDate": "Từ 01/01/2026 (Luật Việc làm 2025)",
+          "action": "Doanh nghiệp cần rà soát lại các loại hợp đồng lao động và đảm bảo đóng BHTN đầy đủ cho tất cả các đối tượng thuộc diện bắt buộc. Cần nắm rõ quy định về điều kiện hưởng trợ cấp thất nghiệp để tư vấn cho người lao động khi cần thiết."
+        },
+        {
+          "id": "bhxh_chu_ho_kinh_doanh",
+          "title": "6. Quy định về BHXH bắt buộc đối với chủ hộ kinh doanh",
+          "content": "Kể từ ngày 01/01/2026, chủ hộ kinh doanh có mức kê khai doanh thu năm trên 01 tỷ đồng phải nộp hồ sơ đăng ký tham gia BHXH bắt buộc.\n\nChủ hộ kinh doanh có mức kê khai doanh thu năm dưới 01 tỷ đồng có thể đăng ký tham gia BHXH tự nguyện.\n\nĐối với các chủ hộ kinh doanh trước đây tham gia BHXH bắt buộc nhưng nay có doanh thu thực tế phát sinh trong năm từ 01 tỷ đồng trở xuống, sẽ dừng thu BHXH bắt buộc kể từ ngày 01/07/2026.",
+          "effectiveDate": "Từ 01/01/2026 (Luật BHXH 2024, Nghị định 158/2025/NĐ-CP, Nghị định 141/2026/NĐ-CP)",
+          "action": "Chủ hộ kinh doanh cần theo dõi doanh thu để xác định nghĩa vụ tham gia BHXH bắt buộc hoặc xem xét tham gia BHXH tự nguyện để đảm bảo quyền lợi an sinh xã hội."
+        }
+      ]
+    }
+  ]
+}

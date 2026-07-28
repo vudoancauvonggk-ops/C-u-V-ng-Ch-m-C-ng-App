@@ -1,0 +1,12 @@
+{
+  "email": "",
+  "password": "",
+  "host": "imap.gmail.com",
+  "port": 993,
+  "tls": true,
+  "lastCheckedUid": 1,
+  "scanTax": true,
+  "scanBhxh": true,
+  "reportNoon": true,
+  "reportNight": true
+}
