@@ -7,8 +7,8 @@ export function ContractCenter() {
   const [hasLoaded, setHasLoaded] = useState(false);
   
   useEffect(() => {
-    get('ai_contracts_idb').then((data: any) => {
-      if (data && Array.isArray(data)) {
+    get('ai_contracts_idb').then(async (data: any) => {
+      if (data && Array.isArray(data) && data.length > 0) {
         const loaded = data.map((c: any) => {
           if (c.file) {
             try {
@@ -20,6 +20,19 @@ export function ContractCenter() {
           return c;
         });
         setContractsState(loaded);
+      } else {
+        try {
+          const res = await fetch('/api/office-state');
+          if (res.ok) {
+            const st = await res.json();
+            if (st.contracts && Array.isArray(st.contracts) && st.contracts.length > 0) {
+              setContractsState(st.contracts);
+              await setIdb('ai_contracts_idb', st.contracts);
+            }
+          }
+        } catch (e) {
+          console.error(e);
+        }
       }
       setHasLoaded(true);
     });
@@ -34,6 +47,11 @@ export function ContractCenter() {
     setContractsState(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
       setIdb('ai_contracts_idb', next);
+      fetch('/api/office-state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contracts: next })
+      }).catch(() => {});
       return next;
     });
   };

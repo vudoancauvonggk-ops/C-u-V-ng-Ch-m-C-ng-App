@@ -81,6 +81,7 @@ class TelegramBotService {
   }
 
   public getStatus() {
+    const state = this.loadOfficeState();
     return {
       connected: !!this.chatId,
       hasToken: !!this.token,
@@ -88,7 +89,10 @@ class TelegramBotService {
       botName: this.botName,
       chatId: this.chatId,
       verificationCode: this.verificationCode,
-      logs: this.logs
+      logs: this.logs,
+      telegramContracts: state.contracts || [],
+      telegramTasks: state.tasks || [],
+      telegramCompliance: state.compliance || []
     };
   }
 
@@ -832,6 +836,23 @@ app.use(express.urlencoded({ extended: true }));
 
   app.get('/api/telegram/status', (req, res) => {
     res.json(botService.getStatus());
+  });
+
+  app.get('/api/office-state', (req, res) => {
+    const state = botService.loadOfficeState();
+    res.json(state);
+  });
+
+  app.post('/api/office-state', (req, res) => {
+    const { contracts, tasks, compliance } = req.body;
+    const currentState = botService.loadOfficeState();
+    const newState = {
+      contracts: contracts !== undefined ? contracts : (currentState.contracts || []),
+      tasks: tasks !== undefined ? tasks : (currentState.tasks || []),
+      compliance: compliance !== undefined ? compliance : (currentState.compliance || [])
+    };
+    botService.saveOfficeState(newState);
+    res.json({ success: true, state: newState });
   });
 
   app.post('/api/telegram/setup', async (req, res) => {
