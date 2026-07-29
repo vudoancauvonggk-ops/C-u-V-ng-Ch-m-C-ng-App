@@ -11,7 +11,7 @@ const config = {
 
 const conn = new Client();
 conn.on('ready', () => {
-  console.log('SSH connection ready for RAM optimization deployment');
+  console.log('SSH connection ready for deployment');
   conn.sftp((err, sftp) => {
     if (err) throw err;
     
@@ -53,21 +53,17 @@ conn.on('ready', () => {
       console.log('Uploading updated dist files...');
       await uploadDir(localDist, remoteDist);
 
-      console.log('Restarting PM2 with 2GB max-old-space-size Node options...');
-      const restartCmd = 'pm2 delete cham-cong-app 2>/dev/null || true; cd /app && pm2 start dist/server.cjs --name cham-cong-app --node-args="--max-old-space-size=2048" --max-memory-restart 1500M';
+      console.log('Restarting PM2 cham-cong-app...');
+      const restartCmd = 'pm2 restart cham-cong-app';
       
       conn.exec(restartCmd, (err, stream) => {
         if (err) throw err;
+        let out = '';
+        stream.on('data', d => out += d.toString());
         stream.on('close', () => {
-          console.log('PM2 process reconfigured. Verifying logs...');
-          conn.exec('pm2 logs cham-cong-app --lines 20 --nostream', (err2, stream2) => {
-            let out = '';
-            stream2.on('data', d => out += d.toString());
-            stream2.on('close', () => {
-              console.log('=== PM2 STATUS LOGS ===\n' + out);
-              conn.end();
-            });
-          });
+          console.log('=== PM2 RESTART OUTPUT ===\n' + out);
+          console.log('Deployment completed successfully!');
+          conn.end();
         });
       });
     }

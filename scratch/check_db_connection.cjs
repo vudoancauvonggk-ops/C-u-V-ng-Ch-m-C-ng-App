@@ -9,12 +9,12 @@ const config = {
 
 const conn = new Client();
 conn.on('ready', () => {
-  conn.exec('pm2 logs cham-cong-app --lines 50 --nostream', (err, stream) => {
+  conn.exec('cd /app && node -e "const { db } = require(\'./dist/server.cjs\'); (async () => { const res = await db.execute(require(\'drizzle-orm\').sql\`SELECT id, teacher_id, date, check_in_time FROM attendance ORDER BY date DESC LIMIT 20\`); console.log(res.rows || res); process.exit(0); })();"', (err, stream) => {
     let out = '';
     stream.on('data', d => out += d.toString());
     stream.on('stderr', d => out += d.toString());
     stream.on('close', () => {
-      console.log('=== PM2 RECENT LOGS ===\n' + out);
+      console.log('=== DB ATTENDANCE RECORDS ===\n' + out);
       conn.end();
     });
   });

@@ -823,12 +823,8 @@ Yêu cầu định dạng báo cáo gửi qua Telegram:
 
 export const officeRouter = express.Router();
 const app = officeRouter;
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-
-  app.use(express.json({ limit: '50mb' }));
-  app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.json({ limit: '200mb' }));
+app.use(express.urlencoded({ limit: '200mb', extended: true }));
 
   const botService = new TelegramBotService();
   // Comment out polling to prevent conflict with the standalone bot

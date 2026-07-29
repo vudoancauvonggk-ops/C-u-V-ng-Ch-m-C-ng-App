@@ -40,8 +40,9 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use('/', officeRouter);
   app.use(express.json({ limit: '200mb' }));
+  app.use(express.urlencoded({ limit: '200mb', extended: true }));
+  app.use('/', officeRouter);
 
   let requestsToday = 0;
   let latestQuickAnnouncement: { id: string; title: string; message: string; targetUserId?: string | null; timestamp: string } | null = null;
