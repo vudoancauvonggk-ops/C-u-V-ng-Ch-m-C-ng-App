@@ -813,6 +813,37 @@ async function startServer() {
     }
   });
 
+  const getLightweightAttendanceList = async () => {
+    const rawAttList = await db.select({
+      id: attendance.id,
+      date: attendance.date,
+      scheduleId: attendance.scheduleId,
+      teacherId: attendance.teacherId,
+      schoolId: attendance.schoolId,
+      classId: attendance.classId,
+      session: attendance.session,
+      checkInTime: attendance.checkInTime,
+      periods: attendance.periods,
+      lat: attendance.lat,
+      lng: attendance.lng,
+      distanceMeter: attendance.distanceMeter,
+      verificationMethod: attendance.verificationMethod,
+      isVerified: attendance.isVerified,
+      isFlagged: attendance.isFlagged,
+      flagReason: attendance.flagReason,
+      confirmedByAdmin: attendance.confirmedByAdmin,
+      hasSelfie: sql<boolean>`length(coalesce(${attendance.selfieImage}, '')) > 0`
+    }).from(attendance);
+
+    return rawAttList.map(att => {
+      const { hasSelfie, ...rest } = att;
+      return {
+        ...rest,
+        selfieImage: hasSelfie ? `/api/attendance/${att.id}/selfie` : ''
+      };
+    });
+  };
+
   // Get All State (convenience endpoint)
   app.get('/api/state', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -829,16 +860,7 @@ async function startServer() {
       const schList = (await db.select().from(schools)).sort((a, b) => a.id.localeCompare(b.id));
       const clsList = (await db.select().from(classes)).sort((a, b) => a.id.localeCompare(b.id));
       const skdList = (await db.select().from(schedules)).sort((a, b) => a.id.localeCompare(b.id));
-      const rawAttList = (await db.select().from(attendance)).sort((a, b) => a.id.localeCompare(b.id));
-      // Optimise payload size: Replace raw base64 images with lightweight API URL placeholders.
-      // This prevents the state JSON from ballooning to 20MB+ and crashing mobile browsers.
-      const attList = rawAttList.map(att => {
-        const hasSelfie = att.selfieImage && att.selfieImage.length > 0;
-        return {
-          ...att,
-          selfieImage: hasSelfie ? `/api/attendance/${att.id}/selfie` : ''
-        };
-      });
+      const attList = (await getLightweightAttendanceList()).sort((a, b) => a.id.localeCompare(b.id));
       const changeList = (await db.select().from(changeRequests)).sort((a, b) => a.id.localeCompare(b.id));
       const notList = (await db.select().from(systemNotifications)).sort((a, b) => a.id.localeCompare(b.id));
       const logList = (await db.select().from(auditLogs)).sort((a, b) => a.id.localeCompare(b.id));
@@ -1334,7 +1356,7 @@ async function startServer() {
       const updatedSchools = await db.select().from(schools);
       const updatedClasses = await db.select().from(classes);
       const updatedSchedules = await db.select().from(schedules);
-      const updatedAttendance = await db.select().from(attendance);
+      const updatedAttendance = await getLightweightAttendanceList();
 
       res.json({ 
         success: true, 
@@ -1715,14 +1737,7 @@ async function startServer() {
   // ATTENDANCE API
   app.get('/api/attendance', async (req, res) => {
     try {
-      const rawList = await db.select().from(attendance);
-      const resList = rawList.map(att => {
-        const hasSelfie = att.selfieImage && att.selfieImage.length > 0;
-        return {
-          ...att,
-          selfieImage: hasSelfie ? `/api/attendance/${att.id}/selfie` : ''
-        };
-      });
+      const resList = await getLightweightAttendanceList();
       res.json(resList);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
