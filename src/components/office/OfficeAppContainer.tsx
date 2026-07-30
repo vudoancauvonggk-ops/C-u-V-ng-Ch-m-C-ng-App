@@ -30,7 +30,7 @@ export default function OfficeAppContainer({ currentUser, hasPermission }: Offic
   };
 
   return (
-    <div className="flex h-[calc(100vh-120px)] bg-slate-50 text-slate-900 font-sans overflow-hidden border border-slate-100 rounded-3xl mt-4 relative">
+    <div className="flex w-full min-w-0 h-[calc(100vh-100px)] bg-slate-50 text-slate-900 font-sans overflow-hidden border border-slate-100 rounded-3xl mt-2 relative">
       {!isMobile && (
         <Sidebar 
           activeTab={activeTab} 

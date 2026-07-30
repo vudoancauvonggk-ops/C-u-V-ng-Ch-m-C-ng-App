@@ -2089,7 +2089,7 @@ export default function AdminDashboard({
       </nav>
 
       {/* TABS CONTAINER */}
-      <div className="p-8 max-w-7xl mx-auto space-y-6">
+      <div className={`mx-auto space-y-6 ${activeTab === 'office_ai' ? 'w-full max-w-[99%] p-2 md:p-4' : 'max-w-[1600px] w-full p-4 md:p-8'}`}>
 
         {/* ----------------TAB 1: DASHBOARD OVERVIEW ---------------- */}
         {activeTab === 'dashboard' && (

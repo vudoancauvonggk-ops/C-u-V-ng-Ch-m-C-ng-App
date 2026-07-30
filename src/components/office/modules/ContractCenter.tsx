@@ -510,14 +510,14 @@ export function ContractCenter() {
                       <table className="w-full text-left text-sm whitespace-nowrap">
                         <thead className="bg-white border-b border-slate-100">
                           <tr>
-                            <th className="px-6 py-3 font-medium text-slate-500 w-[5%]">STT</th>
-                            <th className="px-6 py-3 font-medium text-slate-500">Mã HĐ</th>
-                            <th className="px-6 py-3 font-medium text-slate-500 w-[30%]">Tên hợp đồng</th>
-                            <th className="px-6 py-3 font-medium text-slate-500 w-[20%]">Đối tác</th>
-                            <th className="px-6 py-3 font-medium text-slate-500">Ngày hết hạn</th>
-                            <th className="px-6 py-3 font-medium text-slate-500">Còn lại</th>
-                            <th className="px-6 py-3 font-medium text-slate-500">Trạng thái</th>
-                            <th className="px-6 py-3 font-medium text-slate-500 text-right">Thao tác</th>
+                            <th className="px-4 py-3 font-medium text-slate-500 w-12 text-center">STT</th>
+                            <th className="px-4 py-3 font-medium text-slate-500 min-w-[120px]">Mã HĐ</th>
+                            <th className="px-4 py-3 font-medium text-slate-500 min-w-[280px]">Tên hợp đồng</th>
+                            <th className="px-4 py-3 font-medium text-slate-500 min-w-[200px]">Đối tác</th>
+                            <th className="px-4 py-3 font-medium text-slate-500 min-w-[120px]">Ngày hết hạn</th>
+                            <th className="px-4 py-3 font-medium text-slate-500 min-w-[100px]">Còn lại</th>
+                            <th className="px-4 py-3 font-medium text-slate-500 min-w-[140px]">Trạng thái</th>
+                            <th className="px-4 py-3 font-medium text-slate-500 text-right min-w-[100px]">Thao tác</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50">
@@ -533,18 +533,18 @@ export function ContractCenter() {
                               const daysLeft = getRemainingDays(c.date);
                               return (
                                 <tr key={i} className="hover:bg-slate-50/80 cursor-pointer transition-colors" onClick={() => { setSelectedContract(c); setDetailTab('info'); }}>
-                                  <td className="px-6 py-4 font-medium text-slate-400 text-center">{i + 1}</td>
-                                  <td className="px-6 py-4 font-mono text-slate-500">{c.id}</td>
-                                  <td className="px-6 py-4 font-medium text-slate-900">
+                                  <td className="px-4 py-3.5 font-medium text-slate-400 text-center">{i + 1}</td>
+                                  <td className="px-4 py-3.5 font-mono text-slate-500 font-semibold">{c.id}</td>
+                                  <td className="px-4 py-3.5 font-medium text-slate-900">
                                     <div className="flex items-center gap-3">
                                       <div className="w-8 h-8 rounded bg-blue-50 flex items-center justify-center shrink-0">
                                         <FileText size={16} className="text-blue-500" />
                                       </div>
-                                      <span className="whitespace-normal break-words block font-medium text-slate-900" title={c.title}>{c.title}</span>
+                                      <span className="font-semibold text-slate-900 text-sm leading-snug" title={c.title}>{c.title}</span>
                                     </div>
                                   </td>
-                                  <td className="px-6 py-4 text-slate-600">
-                                    <span className="whitespace-normal break-words block text-slate-700" title={c.partner}>{c.partner}</span>
+                                  <td className="px-4 py-3.5 text-slate-700">
+                                    <span className="font-medium text-slate-700 text-sm" title={c.partner}>{c.partner}</span>
                                   </td>
                                   <td className="px-6 py-4 text-slate-600">{c.date}</td>
                                   <td className="px-6 py-4 font-medium text-slate-700">{formatDaysLeft(daysLeft)}</td>
