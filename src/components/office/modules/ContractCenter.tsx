@@ -506,8 +506,8 @@ export function ContractCenter() {
                       </span>
                     </div>
                     {/* Desktop View: Table */}
-                    <div className="hidden md:block overflow-x-auto">
-                      <table className="w-full text-left text-sm whitespace-nowrap">
+                    <div className="hidden md:block overflow-x-auto custom-horizontal-scrollbar pb-2">
+                      <table className="min-w-[1250px] w-full text-left text-sm whitespace-nowrap">
                         <thead className="bg-white border-b border-slate-100">
                           <tr>
                             <th className="px-4 py-3 font-medium text-slate-500 w-12 text-center">STT</th>
