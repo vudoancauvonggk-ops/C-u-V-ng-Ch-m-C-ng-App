@@ -2,59 +2,6 @@ import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { Search, Plus, FileText, AlertTriangle, FileSearch, RefreshCcw, Loader2, X, UploadCloud, ChevronLeft, Calendar, FileCheck, History, ShieldAlert, Bot, Trash2, CheckCircle2, Edit2 } from 'lucide-react';
 import { get, set as setIdb } from 'idb-keyval';
 
-function DualScrollableTable({ children, minWidth = 1250 }: { children: React.ReactNode; minWidth?: number }) {
-  const topRef = useRef<HTMLDivElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const isSyncingTop = useRef(false);
-  const isSyncingBottom = useRef(false);
-
-  const handleTopScroll = () => {
-    if (isSyncingBottom.current) return;
-    isSyncingTop.current = true;
-    if (topRef.current && bottomRef.current) {
-      bottomRef.current.scrollLeft = topRef.current.scrollLeft;
-    }
-    setTimeout(() => { isSyncingTop.current = false; }, 50);
-  };
-
-  const handleBottomScroll = () => {
-    if (isSyncingTop.current) return;
-    isSyncingBottom.current = true;
-    if (topRef.current && bottomRef.current) {
-      topRef.current.scrollLeft = bottomRef.current.scrollLeft;
-    }
-    setTimeout(() => { isSyncingBottom.current = false; }, 50);
-  };
-
-  return (
-    <div className="flex flex-col w-full border-t border-slate-200">
-      {/* Top Synchronized Horizontal Scrollbar Bar */}
-      <div className="flex items-center gap-3 px-4 py-2 bg-slate-100/90 border-b border-slate-200 text-xs font-semibold text-slate-600 select-none">
-        <span className="shrink-0 flex items-center gap-1.5 text-blue-700 font-bold">
-          <RefreshCcw size={13} className="text-blue-600" />
-          Kéo trượt ngang (Đỉnh bảng):
-        </span>
-        <div 
-          ref={topRef} 
-          onScroll={handleTopScroll} 
-          className="overflow-x-auto custom-horizontal-scrollbar flex-1 h-3.5 cursor-pointer"
-        >
-          <div style={{ width: `${minWidth}px`, height: '1px' }} />
-        </div>
-      </div>
-
-      {/* Main Table Viewport */}
-      <div 
-        ref={bottomRef} 
-        onScroll={handleBottomScroll} 
-        className="overflow-x-auto custom-horizontal-scrollbar pb-2 max-h-[600px] overflow-y-auto"
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
-
 export function ContractCenter() {
   const [contracts, setContractsState] = useState<any[]>([]);
   const [hasLoaded, setHasLoaded] = useState(false);
@@ -558,11 +505,10 @@ export function ContractCenter() {
                         {groupedContracts[year]?.length || 0} hợp đồng
                       </span>
                     </div>
-                    {/* Desktop View: Table with Dual Top & Bottom Synchronized Scrollbars */}
-                    <div className="hidden md:block">
-                      <DualScrollableTable minWidth={1250}>
-                        <table className="min-w-[1250px] w-full text-left text-sm whitespace-nowrap">
-                          <thead className="bg-slate-100 border-b border-slate-200 sticky top-0 z-20">
+                    {/* Desktop View: Clean Table */}
+                    <div className="hidden md:block overflow-x-auto">
+                      <table className="w-full text-left text-sm">
+                        <thead className="bg-slate-50 border-b border-slate-200">
                           <tr>
                             <th className="px-4 py-3 font-medium text-slate-500 w-12 text-center">STT</th>
                             <th className="px-4 py-3 font-medium text-slate-500 min-w-[120px]">Mã HĐ</th>
@@ -626,7 +572,6 @@ export function ContractCenter() {
                           )}
                         </tbody>
                       </table>
-                      </DualScrollableTable>
                     </div>
 
                     {/* Mobile View: Cards Grid */}

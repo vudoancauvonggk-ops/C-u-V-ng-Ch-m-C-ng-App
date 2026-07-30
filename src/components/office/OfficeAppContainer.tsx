@@ -30,7 +30,7 @@ export default function OfficeAppContainer({ currentUser, hasPermission }: Offic
   };
 
   return (
-    <div className="flex w-full min-w-0 h-[calc(100vh-100px)] bg-slate-50 text-slate-900 font-sans overflow-hidden border border-slate-100 rounded-3xl mt-2 relative">
+    <div className="flex w-full min-w-0 min-h-[calc(100vh-140px)] bg-slate-50 text-slate-900 font-sans border border-slate-100 rounded-3xl mt-2 relative">
       {!isMobile && (
         <Sidebar 
           activeTab={activeTab} 
@@ -40,7 +40,7 @@ export default function OfficeAppContainer({ currentUser, hasPermission }: Offic
           hasPermission={hasPermission}
         />
       )}
-      <main className={`flex-1 flex flex-col h-full overflow-y-auto relative ${isMobile ? 'pb-16' : ''}`}>
+      <main className={`flex-1 flex flex-col relative ${isMobile ? 'pb-16' : ''}`}>
         {isMobile && (
           <MobileHeader 
             activeTab={activeTab} 
