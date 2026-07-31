@@ -2116,34 +2116,6 @@ export default function AdminDashboard({
         {activeTab === 'dashboard' && (
           <div className="space-y-6 animate-fadeIn" id="dashboard_tab">
             
-            {/* Quick Action Banner for Recruitment Link */}
-            <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white p-5 rounded-2xl shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex items-center gap-3.5">
-                <div className="p-3 bg-white/10 backdrop-blur-md rounded-xl shrink-0">
-                  <UserPlus className="h-6 w-6 text-white" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-base flex items-center gap-2">
-                    Cổng Đăng Ký Tuyển Dụng Giáo Viên Mới
-                    <span className="bg-white/20 text-xs px-2.5 py-0.5 rounded-full font-mono">Public Link</span>
-                  </h3>
-                  <p className="text-xs text-blue-100 mt-1">
-                    Gửi đường dẫn này cho ứng viên / giáo viên mới muốn đăng ký nộp hồ sơ tuyển dụng: <code className="bg-black/20 px-2 py-0.5 rounded font-mono text-white font-semibold">https://cauvongdulieu.duckdns.org/apply</code>
-                  </p>
-                </div>
-              </div>
-
-              <button
-                onClick={handleCopyApplyLink}
-                className="flex items-center justify-center gap-2 bg-white text-blue-700 hover:bg-blue-50 font-bold text-sm px-5 py-3 rounded-xl shadow-md hover:shadow-lg transition-all active:scale-95 shrink-0 cursor-pointer"
-                title="Sao chép đường dẫn nộp hồ sơ tuyển dụng giáo viên"
-              >
-                <UserPlus className="h-4 w-4 text-blue-600" />
-                {copiedApplyLink ? '✓ Đã chép link đăng ký!' : 'Đăng ký tuyển dụng (Copy Link)'}
-                {copiedApplyLink ? <Check className="h-4 w-4 text-emerald-600 ml-1" /> : <Copy className="h-4 w-4 opacity-70 ml-1" />}
-              </button>
-            </div>
-            
             {/* Bento statistics grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
@@ -2234,6 +2206,17 @@ export default function AdminDashboard({
                     <div>
                       <h3 className="font-bold text-slate-800 text-base">Cập Nhật Định Vị (GPS) Trường</h3>
                       <p className="text-xs text-slate-500 mt-1">Giáo viên sẽ thấy nút "Lưu định vị trường bằng GPS hiện tại" trong tab Định Vị.</p>
+                      
+                      {/* Compact small Recruitment Link Copy button */}
+                      <button
+                        onClick={handleCopyApplyLink}
+                        className="mt-2.5 inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200 hover:border-blue-300 text-xs font-medium rounded-lg transition-colors cursor-pointer"
+                        title="Sao chép link đăng ký tuyển dụng giáo viên"
+                      >
+                        <UserPlus size={13} className="text-blue-600" />
+                        {copiedApplyLink ? '✓ Đã chép link tuyển dụng' : 'Đăng ký tuyển dụng'}
+                        {copiedApplyLink ? <Check size={13} className="text-emerald-600 ml-0.5" /> : <Copy size={12} className="opacity-60 ml-0.5" />}
+                      </button>
                     </div>
                   </div>
                   <div>
