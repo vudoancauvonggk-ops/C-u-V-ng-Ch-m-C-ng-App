@@ -15,7 +15,10 @@ import {
   ChevronDown, 
   ChevronUp, 
   Sparkles,
-  MessageSquare
+  MessageSquare,
+  UserPlus,
+  Copy,
+  Check
 } from 'lucide-react';
 
 interface CandidateFile {
@@ -48,6 +51,25 @@ export function CandidateManagement() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+  const [copiedApplyLink, setCopiedApplyLink] = useState(false);
+
+  const handleCopyApplyLink = () => {
+    const link = 'https://cauvongdulieu.duckdns.org/apply';
+    navigator.clipboard.writeText(link).then(() => {
+      setCopiedApplyLink(true);
+      setTimeout(() => setCopiedApplyLink(false), 2500);
+    }).catch(err => {
+      console.error('Failed to copy link:', err);
+      const textArea = document.createElement('textarea');
+      textArea.value = link;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      setCopiedApplyLink(true);
+      setTimeout(() => setCopiedApplyLink(false), 2500);
+    });
+  };
   const [expandedId, setExpandedId] = useState<string | null>(null);
   
   // Temporary states for evaluation inputs
@@ -187,6 +209,16 @@ export function CandidateManagement() {
             Đánh giá, nhận xét và phê duyệt hồ sơ ứng viên đăng ký từ cổng tuyển dụng công cộng.
           </p>
         </div>
+
+        <button
+          onClick={handleCopyApplyLink}
+          className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs md:text-sm px-4 py-2.5 rounded-xl shadow-md hover:shadow-lg transition-all active:scale-95 cursor-pointer"
+          title="Sao chép đường dẫn đăng ký tuyển dụng giáo viên"
+        >
+          <UserPlus size={17} />
+          {copiedApplyLink ? '✓ Đã chép link đăng ký!' : 'Đăng ký tuyển dụng'}
+          {copiedApplyLink ? <Check size={15} className="text-emerald-300 ml-0.5" /> : <Copy size={14} className="opacity-80 ml-0.5" />}
+        </button>
       </div>
 
       {/* Main content body */}

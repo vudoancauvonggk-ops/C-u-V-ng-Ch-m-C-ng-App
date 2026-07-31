@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Target, AlertCircle, Clock, FileSignature, BarChart2, Bot, Loader2, ChevronDown, ChevronRight, Info, Bell, ShieldAlert } from 'lucide-react';
+import { Target, AlertCircle, Clock, FileSignature, BarChart2, Bot, Loader2, ChevronDown, ChevronRight, Info, Bell, ShieldAlert, UserPlus, Copy, Check } from 'lucide-react';
 import { get, set as setIdb } from 'idb-keyval';
 
 export function CommandCenter() {
@@ -9,6 +9,25 @@ export function CommandCenter() {
   const [complianceData, setComplianceData] = useState<any>(null);
   const [aiUpdates, setAiUpdates] = useState<any>(null);
   const [aiUpdatesLoading, setAiUpdatesLoading] = useState(true);
+  const [copiedApplyLink, setCopiedApplyLink] = useState(false);
+
+  const handleCopyApplyLink = () => {
+    const link = 'https://cauvongdulieu.duckdns.org/apply';
+    navigator.clipboard.writeText(link).then(() => {
+      setCopiedApplyLink(true);
+      setTimeout(() => setCopiedApplyLink(false), 2500);
+    }).catch(err => {
+      console.error('Failed to copy link:', err);
+      const textArea = document.createElement('textarea');
+      textArea.value = link;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      setCopiedApplyLink(true);
+      setTimeout(() => setCopiedApplyLink(false), 2500);
+    });
+  };
 
   useEffect(() => {
     get('ai_contracts_idb').then((data: any) => {
@@ -211,18 +230,30 @@ export function CommandCenter() {
 
   return (
     <div className="p-8 w-full mx-auto space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
-          <Target className="text-blue-600" size={28} />
-          Trung tâm công việc (Command Center)
-          {activeAlerts.length > 0 && (
-            <span className="flex items-center gap-1.5 ml-2 bg-red-50 text-red-700 text-xs font-bold px-2.5 py-1 rounded-full border border-red-200 animate-pulse">
-              <Bell size={14} className="text-red-600 animate-bounce" />
-              {activeAlerts.length} Báo cáo sắp đến hạn
-            </span>
-          )}
-        </h1>
-        <p className="text-slate-500 mt-2">Bản tin tóm tắt buổi sáng dành cho Giám đốc, tổng hợp tự động bằng AI.</p>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
+            <Target className="text-blue-600" size={28} />
+            Trung tâm công việc (Command Center)
+            {activeAlerts.length > 0 && (
+              <span className="flex items-center gap-1.5 ml-2 bg-red-50 text-red-700 text-xs font-bold px-2.5 py-1 rounded-full border border-red-200 animate-pulse">
+                <Bell size={14} className="text-red-600 animate-bounce" />
+                {activeAlerts.length} Báo cáo sắp đến hạn
+              </span>
+            )}
+          </h1>
+          <p className="text-slate-500 mt-1.5 text-sm">Bản tin tóm tắt buổi sáng dành cho Giám đốc, tổng hợp tự động bằng AI.</p>
+        </div>
+
+        <button
+          onClick={handleCopyApplyLink}
+          className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-sm px-4 py-2.5 rounded-xl shadow-md hover:shadow-lg transition-all active:scale-95 shrink-0 self-start md:self-auto cursor-pointer"
+          title="Sao chép đường dẫn đăng ký tuyển dụng giáo viên"
+        >
+          <UserPlus size={18} />
+          {copiedApplyLink ? '✓ Đã chép link đăng ký!' : 'Đăng ký tuyển dụng'}
+          {copiedApplyLink ? <Check size={16} className="text-emerald-300 ml-0.5" /> : <Copy size={15} className="opacity-80 ml-0.5" />}
+        </button>
       </div>
 
       {loading ? (
