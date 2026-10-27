@@ -19,8 +19,36 @@ import {
   AppSettings,
   MeetingAttendance
 } from './types';
-import AdminDashboard from './components/AdminDashboard';
 import TeacherDashboard from './components/TeacherDashboard';
+
+// Auto-retry lazy load on dynamic import failure (e.g. when app is updated with new chunk hashes)
+const lazyWithRetry = (componentImport: () => Promise<any>) =>
+  React.lazy(async () => {
+    const isRetry = window.sessionStorage.getItem('chunk_retry_attempt');
+    try {
+      const component = await componentImport();
+      window.sessionStorage.removeItem('chunk_retry_attempt');
+      return component;
+    } catch (error: any) {
+      if (!isRetry) {
+        window.sessionStorage.setItem('chunk_retry_attempt', '1');
+        if ('caches' in window) {
+          try {
+            const keys = await caches.keys();
+            await Promise.all(keys.map(k => caches.delete(k)));
+          } catch {}
+        }
+        const url = new URL(window.location.href);
+        url.searchParams.set('v', Date.now().toString());
+        window.location.href = url.toString();
+        return { default: () => null };
+      }
+      throw error;
+    }
+  });
+
+// Lazy load heavy admin dashboard to keep mobile/teacher bundle extremely lightweight (~100KB instead of 2.2MB)
+const AdminDashboard = lazyWithRetry(() => import('./components/AdminDashboard'));
 import { 
   Laptop, 
   Smartphone, 
@@ -42,6 +70,50 @@ import {
   Settings
 } from 'lucide-react';
 
+// ==========================================
+// [NÂNG CẤP MỤC 7]: QUẢN LÝ HÀNG ĐỢI CHẤM CÔNG NGOẠI TUYẾN (OFFLINE ATTENDANCE SYNC)
+// ==========================================
+function saveAttendanceToOfflineQueue(payload: { upsert: any[]; remove: string[] }) {
+  try {
+    const raw = localStorage.getItem('cauvong_offline_attendance_queue');
+    const existing = raw ? JSON.parse(raw) : { upsert: [], remove: [] };
+    const upsertMap = new Map();
+    (existing.upsert || []).forEach((item: any) => upsertMap.set(item.id, item));
+    (payload.upsert || []).forEach((item: any) => upsertMap.set(item.id, item));
+    const mergedUpsert = Array.from(upsertMap.values());
+    const mergedRemove = Array.from(new Set([...(existing.remove || []), ...(payload.remove || [])]));
+
+    localStorage.setItem('cauvong_offline_attendance_queue', JSON.stringify({ upsert: mergedUpsert, remove: mergedRemove }));
+    window.dispatchEvent(new CustomEvent('cauvong_offline_status_change', { detail: { count: mergedUpsert.length } }));
+    console.log('📶 [OFFLINE SYNC] Đã lưu ca chấm công vào bộ nhớ đệm ngoại tuyến. Tổng chờ:', mergedUpsert.length);
+  } catch (e) {
+    console.error('Lỗi lưu offline queue:', e);
+  }
+}
+
+async function flushOfflineAttendanceQueue() {
+  try {
+    const raw = localStorage.getItem('cauvong_offline_attendance_queue');
+    if (!raw) return;
+    const queue = JSON.parse(raw);
+    if (!queue || (!queue.upsert?.length && !queue.remove?.length)) return;
+
+    console.log('🌐 [OFFLINE SYNC] Đang gửi', queue.upsert.length, 'ca chấm công ngoại tuyến lên máy chủ Cầu Vồng...');
+    const res = await fetch('/api/attendance/bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(queue)
+    });
+    if (res.ok) {
+      localStorage.removeItem('cauvong_offline_attendance_queue');
+      window.dispatchEvent(new CustomEvent('cauvong_offline_status_change', { detail: { count: 0, synced: true } }));
+      console.log('✅ [OFFLINE SYNC] Đồng bộ thành công toàn bộ ca chấm công ngoại tuyến!');
+    }
+  } catch (err) {
+    console.warn('Đồng bộ ngoại tuyến chưa thành công, sẽ thử lại khi có sóng ổn định:', err);
+  }
+}
+
 let syncQueue = Promise.resolve();
 
 // ============================================================
@@ -56,20 +128,44 @@ export class ErrorBoundary extends React.Component<{children: React.ReactNode}, 
     this.props = props;
   }
   static getDerivedStateFromError(error: Error) {
+    // Tự động reload nếu là lỗi cập nhật phiên bản dynamic module
+    if (error?.message && (error.message.includes('dynamically imported module') || error.message.includes('Loading chunk') || error.message.includes('Failed to fetch'))) {
+      const autoReloadDone = sessionStorage.getItem('auto_reload_chunk_error');
+      if (!autoReloadDone) {
+        sessionStorage.setItem('auto_reload_chunk_error', '1');
+        if ('caches' in window) {
+          caches.keys().then(names => Promise.all(names.map(name => caches.delete(name)))).catch(() => {});
+        }
+        const url = new URL(window.location.href);
+        url.searchParams.set('reload_v', Date.now().toString());
+        window.location.href = url.toString();
+      }
+    }
     return { hasError: true, error };
   }
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error('[ErrorBoundary]', error, info);
   }
-  handleReset = () => {
+  handleReset = async () => {
     try { localStorage.clear(); } catch {}
     try { sessionStorage.clear(); } catch {}
     if ('caches' in window) {
-      caches.keys().then(names => {
-        names.forEach(name => caches.delete(name));
-      });
+      try {
+        const names = await caches.keys();
+        await Promise.all(names.map(name => caches.delete(name)));
+      } catch {}
     }
-    window.location.reload();
+    if ('serviceWorker' in navigator) {
+      try {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        for (const reg of registrations) {
+          await reg.unregister();
+        }
+      } catch {}
+    }
+    const url = new URL(window.location.href);
+    url.searchParams.set('v', Date.now().toString());
+    window.location.href = url.toString();
   };
   render() {
     if (this.state.hasError) {
@@ -78,7 +174,7 @@ export class ErrorBoundary extends React.Component<{children: React.ReactNode}, 
           <div style={{ background: 'white', borderRadius: '20px', padding: '32px', maxWidth: '500px', width: '100%', border: '2px solid #fca5a5', boxShadow: '0 20px 60px rgba(0,0,0,0.1)' }}>
             <div style={{ fontSize: '48px', textAlign: 'center', marginBottom: '16px' }}>⚠️</div>
             <h2 style={{ color: '#b91c1c', fontSize: '18px', fontWeight: 'bold', marginBottom: '8px', textAlign: 'center' }}>Ứng dụng gặp sự cố</h2>
-            <p style={{ color: '#64748b', fontSize: '14px', textAlign: 'center', marginBottom: '16px' }}>Đã xảy ra lỗi không mong muốn. Vui lòng bấm nút bên dưới để khởi động lại ứng dụng.</p>
+            <p style={{ color: '#64748b', fontSize: '14px', textAlign: 'center', marginBottom: '16px' }}>Đã xảy ra lỗi không mong muốn hoặc phiên bản ứng dụng vừa được cập nhật. Vui lòng bấm nút bên dưới để khởi động lại ứng dụng.</p>
             <details open style={{ marginBottom: '20px', background: '#fef2f2', borderRadius: '10px', padding: '12px', fontSize: '11px', color: '#991b1b' }}>
               <summary style={{ cursor: 'pointer', fontWeight: 'bold' }}>Chi tiết lỗi kỹ thuật</summary>
               <pre style={{ marginTop: '8px', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
@@ -89,7 +185,7 @@ export class ErrorBoundary extends React.Component<{children: React.ReactNode}, 
               onClick={this.handleReset}
               style={{ width: '100%', padding: '14px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '15px', cursor: 'pointer' }}
             >
-              🔄 Khởi động lại ứng dụng
+              🔄 Tải lại & Cập nhật ứng dụng mới nhất
             </button>
           </div>
         </div>
@@ -100,7 +196,7 @@ export class ErrorBoundary extends React.Component<{children: React.ReactNode}, 
 }
 
 export default function App() {
-  // Global State initialized directly to clean empty arrays on startup to prevent auto-fetch freezes
+  // Global State initialized directly from localStorage cache for INSTANT 0ms startup on mobile (Stale-While-Revalidate)
   const [state, setState] = useState<{
       teachers: Teacher[];
       schools: School[];
@@ -115,21 +211,24 @@ export default function App() {
       settings: AppSettings;
       quickAnnouncement?: { id: string; title: string; message: string; timestamp: string } | null;
       schoolCancellations: any[];
-  }>(() => ({
-    teachers: [],
-    schools: [],
-    classes: [],
-    schedules: [],
-    attendance: [],
-    changes: [],
-    notifications: [],
-    auditLogs: [],
-    users: [],
-    meetingAttendance: [],
-    settings: { id: 'global', allowTeacherScheduleEdit: false },
-    quickAnnouncement: null,
-    schoolCancellations: []
-  }));
+  }>(() => {
+    const stored = getStoredData();
+    return {
+      teachers: stored.teachers || [],
+      schools: stored.schools || [],
+      classes: stored.classes || [],
+      schedules: stored.schedules || [],
+      attendance: stored.attendance || [],
+      changes: stored.changes || [],
+      notifications: stored.notifications || [],
+      auditLogs: stored.auditLogs || [],
+      users: stored.users || [],
+      meetingAttendance: stored.meetingAttendance || [],
+      settings: stored.settings || { id: 'global', allowTeacherScheduleEdit: false },
+      quickAnnouncement: null,
+      schoolCancellations: (stored as any).schoolCancellations || []
+    };
+  });
   
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
     try {
@@ -161,7 +260,8 @@ export default function App() {
     }
   });
 
-  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  // Show splash loading screen on initial app launch
+  const [isInitialLoad, setIsInitialLoad] = useState<boolean>(true);
 
   const handleLoginSuccess = (user: AppUser) => {
     let parsed: any = [];
@@ -214,12 +314,14 @@ export default function App() {
           }
         });
       } else {
+        const trimmedUser = usernameInput.trim();
+        const trimmedPass = passwordInput.trim();
         res = await fetch('/api/auth/login', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ username: usernameInput, password: passwordInput })
+          body: JSON.stringify({ username: trimmedUser, password: trimmedPass })
         });
       }
       
@@ -307,7 +409,7 @@ export default function App() {
     let currentServerVersion: string | null = null;
     let lastKnownTimestamp = 0;
 
-    const fetchLatestState = async () => {
+    const fetchLatestState = async (): Promise<boolean> => {
       try {
         const response = await fetch('/api/state', { 
           cache: 'no-store',
@@ -315,7 +417,7 @@ export default function App() {
         });
         if (response.ok) {
           const dbState = await response.json();
-          if (dbState && dbState.teachers) {
+          if (dbState && Array.isArray(dbState.teachers)) {
             if (dbState.users && Array.isArray(dbState.users)) {
               dbState.users = dbState.users.map((u: any) => {
                 let parsed: any = [];
@@ -404,14 +506,20 @@ export default function App() {
             
             setState(dbState);
             saveStoredData(dbState);
+            return true;
           }
         }
       } catch (err) {
         console.error('Failed to fetch state from API', err);
       }
+      return false;
     };
 
     const pollForChanges = async () => {
+      // Tạm ngưng poll khi tab đang ẩn/màn hình tắt để tiết kiệm pin và băng thông
+      if (typeof document !== 'undefined' && document.hidden) {
+        return;
+      }
       try {
         const res = await fetch('/api/state/timestamp', { cache: 'no-store' });
         if (res.ok) {
@@ -424,9 +532,11 @@ export default function App() {
               return;
            }
 
-           if (timestamp !== lastKnownTimestamp) {
-              lastKnownTimestamp = timestamp;
-              await fetchLatestState();
+           if (timestamp !== lastKnownTimestamp || state.teachers.length === 0) {
+              const success = await fetchLatestState();
+              if (success) {
+                lastKnownTimestamp = timestamp;
+              }
            }
         }
       } catch (err) {
@@ -434,39 +544,42 @@ export default function App() {
       }
     };
 
-    const checkDatabaseHealth = async (): Promise<boolean> => {
-      try {
-        const res = await fetch('/api/health');
-        if (res.ok) {
-          const data = await res.json();
-          return data.status === 'ok';
-        }
-        return false;
-      } catch (e) {
-        return false;
-      }
-    };
-
     const initialLoad = async () => {
-       setIsInitialLoad(true);
+       const startTime = Date.now();
        try {
-         const hasData = await checkDatabaseHealth();
-         if (hasData) {
-            await pollForChanges();
-         } else {
-            setState(getStoredData());
+         // Fetch latest state immediately in background
+         const ok = await fetchLatestState();
+         if (!ok) {
+           // Retry after a short delay if first attempt failed
+           setTimeout(fetchLatestState, 1500);
          }
        } catch (err) {
-         setState(getStoredData());
+         console.warn('Background state sync error:', err);
        } finally {
-         setIsInitialLoad(false);
+         const elapsed = Date.now() - startTime;
+         const minSplashDuration = 1200;
+         if (elapsed < minSplashDuration) {
+           setTimeout(() => {
+             setIsInitialLoad(false);
+           }, minSplashDuration - elapsed);
+         } else {
+           setIsInitialLoad(false);
+         }
        }
     };
     
     initialLoad();
 
-    // Set up real-time polling every 5 seconds using lightweight timestamp endpoint
-    const intervalId = setInterval(pollForChanges, 5000);
+    // Đồng bộ tức thì ngay khi người dùng chuyển lại tab ứng dụng
+    const handleVisibilityChange = () => {
+      if (typeof document !== 'undefined' && !document.hidden) {
+        pollForChanges();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Chu kỳ kiểm tra định kỳ 10 giây (tiết kiệm 50% tài nguyên mạng so với 5s)
+    const intervalId = setInterval(pollForChanges, 10000);
     
     // Also listen for cross-tab local storage changes (if users have multiple tabs in same browser)
     const handleStorageChange = () => {
@@ -482,6 +595,7 @@ export default function App() {
     
     return () => {
        clearInterval(intervalId);
+       document.removeEventListener('visibilitychange', handleVisibilityChange);
        window.removeEventListener('storage', handleStorageChange);
     };
   }, []);
@@ -667,6 +781,12 @@ export default function App() {
         // Skip API call if nothing changed
         if (upsert.length === 0 && deletedIds.length === 0) return;
 
+        // KIỂM TRA MẠNG: NẾU NGOẠI TUYẾN (MẤT SÓNG 4G/WIFI) -> LƯU HÀNG ĐỢI OFFLINE
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          saveAttendanceToOfflineQueue({ upsert, remove: deletedIds });
+          return;
+        }
+
         const res = await fetch('/api/attendance/bulk', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -678,7 +798,19 @@ export default function App() {
           throw new Error(errText);
         }
       } catch (err) {
-        console.error('Error syncing attendance to PostgreSQL:', err);
+        console.error('Error syncing attendance to PostgreSQL, retrying in 3s:', err);
+        // Tự động retry lại sau 3s nếu nghẽn mạng
+        setTimeout(async () => {
+          try {
+            await fetch('/api/attendance/bulk', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ upsert: updatedAttendance, remove: [] })
+            });
+          } catch (retryErr) {
+            console.error('Retry sync attendance failed:', retryErr);
+          }
+        }, 3000);
       }
     }).catch(err => console.error(err));
   };
@@ -695,7 +827,10 @@ export default function App() {
     syncQueue = syncQueue.then(async () => {
       try {
         const nextIds = updatedChanges.map(c => c.id);
-        const deletedIds = prevIds.filter(id => !nextIds.includes(id));
+        const deletedIds = prevIds.filter(id => !nextIds.includes(id)).filter(id => {
+          const item = prevStateArray.find(x => x.id === id);
+          return currentUser?.role === 'admin' || (item && item.teacherId === currentUser?.teacherId);
+        });
         const upsert = updatedChanges.filter(item => {
            const old = prevStateArray.find(o => o.id === item.id);
            if (!old) return true;
@@ -1077,6 +1212,12 @@ export default function App() {
       saveStoredData(nextState);
       return nextState;
     });
+
+    fetch('/api/school-cancellations/bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ upsert: updated })
+    }).catch(e => console.error('Failed to sync school cancellations to backend:', e));
   };
 
   // Send Push warnings / Alerts
@@ -1132,47 +1273,47 @@ export default function App() {
 
   if (isInitialLoad) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 relative overflow-hidden font-sans">
-        {/* Background Radial Glow */}
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.08)_0%,rgba(15,23,42,0)_70%)] pointer-events-none"></div>
+      <div className="min-h-screen bg-gradient-to-br from-[#fefcf9] via-white to-[#f0f4ff] flex flex-col items-center justify-center p-4 relative overflow-hidden font-sans select-none">
+        {/* Rainbow top stripe */}
+        <div className="absolute top-0 left-0 right-0 h-1 cv-rainbow-bar"></div>
         
-        {/* Large Logo Backdrop Watermark */}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[320px] h-[320px] sm:w-[420px] sm:h-[420px] opacity-[0.08] blur-[2px] pointer-events-none select-none">
-          <img 
-            src="/logo_cauvong.jpg" 
-            alt="Watermark Logo" 
-            className="w-full h-full object-contain rounded-full"
-          />
-        </div>
+        {/* Soft decorative blurs */}
+        <div className="absolute top-20 -left-32 w-72 h-72 bg-blue-200/20 rounded-full blur-3xl pointer-events-none"></div>
+        <div className="absolute bottom-20 -right-32 w-72 h-72 bg-amber-200/20 rounded-full blur-3xl pointer-events-none"></div>
 
-        {/* Foreground Content Card */}
-        <div className="relative z-10 flex flex-col items-center text-center max-w-md w-full space-y-6">
-          {/* Main Logo Container with Ring & Glow */}
-          <div className="relative">
-            <div className="absolute -inset-1 bg-gradient-to-r from-blue-500 via-pink-500 to-yellow-500 rounded-full blur opacity-40 animate-pulse"></div>
-            <div className="relative bg-slate-900 p-2.5 rounded-full border border-slate-800 shadow-2xl">
+        {/* Content */}
+        <div className="relative z-10 flex flex-col items-center text-center max-w-md w-full space-y-6 animate-slide-up">
+          {/* Logo with gold ring */}
+          <div className="cv-logo-ring">
+            <div className="w-28 h-28 rounded-full overflow-hidden bg-white shadow-lg">
               <img 
                 src="/logo_cauvong.jpg" 
                 alt="Cầu Vồng Logo" 
-                className="w-24 h-24 object-contain rounded-full"
+                className="w-full h-full object-contain"
               />
             </div>
           </div>
 
-          {/* Glowing Welcome Text */}
+          {/* Welcome text */}
           <div className="space-y-2">
-            <h2 className="text-xl md:text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-100 to-slate-300 tracking-tight leading-tight select-none">
-              Chào Mừng Bạn Đến Với Cầu Vồng
+            <h2 className="text-2xl md:text-3xl font-bold text-[#1e3a5f] tracking-tight leading-tight font-display">
+              Chào Mừng Bạn Đến Với
             </h2>
-            <p className="text-slate-400 text-[10px] font-bold tracking-widest uppercase animate-pulse">
-              Đang tải dữ liệu...
+            <h1 className="text-3xl md:text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-[#1e3a5f] via-[#2563eb] to-[#1e3a5f] font-display">
+              Cầu Vồng ETMS
+            </h1>
+            <p className="text-sm text-slate-500 font-medium mt-1">
+              Trung Tâm Nghệ Thuật Aerobic Cầu Vồng
             </p>
           </div>
 
-          {/* Minimalist Premium Progress Bar Indicator */}
-          <div className="w-40 h-1 bg-slate-800 rounded-full overflow-hidden relative">
-            <div className="absolute top-0 bottom-0 left-0 bg-gradient-to-r from-blue-500 via-pink-500 to-yellow-500 w-1/2 rounded-full animate-progress-loading"></div>
+          {/* Progress bar - rainbow gradient */}
+          <div className="w-52 h-1.5 bg-slate-100 rounded-full overflow-hidden relative shadow-inner">
+            <div className="absolute top-0 bottom-0 left-0 cv-rainbow-bar w-1/2 rounded-full animate-progress-loading"></div>
           </div>
+          <p className="text-xs text-[#1e3a5f]/60 font-semibold tracking-wide">
+            Đang khởi động hệ thống...
+          </p>
         </div>
       </div>
     );
@@ -1180,27 +1321,41 @@ export default function App() {
 
   if (!currentUser) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 lg:p-8 font-sans select-none relative overflow-hidden" id="login_root">
-        <div className="absolute top-0 -left-40 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl pointer-events-none"></div>
-        <div className="absolute bottom-0 -right-40 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
+      <div className="min-h-screen bg-gradient-to-br from-[#fefcf9] via-white to-[#f0f4ff] flex flex-col items-center justify-center p-4 lg:p-8 font-sans select-none relative overflow-hidden" id="login_root">
+        {/* Rainbow top stripe */}
+        <div className="absolute top-0 left-0 right-0 h-1 cv-rainbow-bar z-20"></div>
 
-        <div className="max-w-md w-full relative z-10 space-y-6">
-          <div className="text-center space-y-3">
-            <div className="inline-flex p-3 bg-blue-600 rounded-2xl relative overflow-hidden font-display font-extrabold text-white text-xl shadow-lg shadow-blue-500/25 tracking-wider select-none animate-bounce">
-              ETMS
-              <div className="absolute inset-0 bg-white/10 skew-x-12 translate-x-5"></div>
+        {/* Decorative floating orbs */}
+        <div className="absolute top-16 left-8 w-48 h-48 bg-blue-100/40 rounded-full blur-3xl pointer-events-none animate-float"></div>
+        <div className="absolute bottom-16 right-8 w-56 h-56 bg-amber-100/40 rounded-full blur-3xl pointer-events-none animate-float" style={{animationDelay: '2s'}}></div>
+        <div className="absolute top-1/2 left-1/4 w-32 h-32 bg-rose-100/30 rounded-full blur-3xl pointer-events-none animate-float" style={{animationDelay: '4s'}}></div>
+
+        <div className="max-w-md w-full relative z-10 space-y-6 animate-slide-up">
+          {/* Logo & Brand */}
+          <div className="text-center space-y-4">
+            <div className="relative inline-flex items-center justify-center">
+              <div className="cv-logo-ring">
+                <div className="w-24 h-24 rounded-full overflow-hidden bg-white shadow-lg">
+                  <img 
+                    src="/logo_cauvong.jpg" 
+                    alt="Cầu Vồng Logo" 
+                    className="w-full h-full object-contain"
+                  />
+                </div>
+              </div>
             </div>
             <div>
-              <h2 className="text-xl font-extrabold text-white tracking-tight">Hệ Thống Quản Lý Giáo Viên</h2>
-              <p className="text-xs text-slate-400 mt-1">Đăng nhập để vào hệ thống quản lý lịch giảng dạy & chấm công</p>
+              <h2 className="text-2xl font-extrabold text-[#1e3a5f] tracking-tight font-display">Hệ Thống Quản Lý Cầu Vồng</h2>
+              <p className="text-sm text-slate-500 mt-1.5 font-medium">Trung Tâm Nghệ Thuật Aerobic Cầu Vồng</p>
             </div>
           </div>
 
-          <div className="bg-slate-900/85 backdrop-blur-md rounded-3xl p-6 border border-slate-800 shadow-2xl space-y-5">
-            <h3 className="text-sm font-bold text-slate-300 uppercase tracking-widest text-center border-b border-slate-800 pb-3">ĐĂNG NHẬP HỆ THỐNG</h3>
+          {/* Login Card */}
+          <div className="bg-white/90 backdrop-blur-xl rounded-3xl p-7 border border-slate-200/80 shadow-xl shadow-slate-200/50 space-y-5">
+            <h3 className="text-sm font-bold text-[#1e3a5f] uppercase tracking-widest text-center border-b border-slate-100 pb-3 font-display">ĐĂNG NHẬP HỆ THỐNG</h3>
 
             {loginError && (
-              <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs py-2.5 px-3.5 rounded-xl font-medium flex items-center gap-2">
+              <div className="bg-rose-50 border border-rose-200 text-rose-600 text-xs py-2.5 px-3.5 rounded-xl font-medium flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0"></span>
                 <span>{loginError}</span>
               </div>
@@ -1208,36 +1363,39 @@ export default function App() {
 
             <form onSubmit={(e) => handleLoginSubmit(e, 'legacy')} className="space-y-4">
               <div className="space-y-1.5">
-                <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Tài khoản (Username)</label>
+                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Tài khoản (Mã GV hoặc Số ĐT)</label>
                 <div className="relative">
-                  <User className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                  <User className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                   <input
                     type="text"
                     required
                     value={usernameInput}
                     onChange={(e) => setUsernameInput(e.target.value)}
-                    className="w-full bg-slate-950/80 border border-slate-800 rounded-xl py-2.5 pl-11 pr-4 text-xs text-white focus:outline-hidden focus:border-blue-500 focus:ring-1 focus:ring-blue-500 placeholder-slate-600 transition"
-                    placeholder="Nhập tên tài khoản..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 pl-11 pr-4 text-sm text-slate-800 focus:outline-hidden focus:border-[#1e3a5f] focus:ring-2 focus:ring-[#1e3a5f]/20 placeholder-slate-400 transition font-medium"
+                    placeholder="Nhập Mã GV (GV_..., GV001) hoặc Số điện thoại..."
                   />
                 </div>
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Mật khẩu (Password)</label>
+                <div className="flex justify-between items-center">
+                  <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Mật khẩu (Password)</label>
+                  <span className="text-[10px] text-slate-400 font-mono">Mặc định: 123456789</span>
+                </div>
                 <div className="relative">
-                  <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                  <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                   <input
                     type={showPassword ? "text" : "password"}
                     required
                     value={passwordInput}
                     onChange={(e) => setPasswordInput(e.target.value)}
-                    className="w-full bg-slate-950/80 border border-slate-800 rounded-xl py-2.5 pl-11 pr-11 text-xs text-white focus:outline-hidden focus:border-blue-500 focus:ring-1 focus:ring-blue-500 placeholder-slate-600 transition"
-                    placeholder="Nhập mật khẩu..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 pl-11 pr-11 text-sm text-slate-800 focus:outline-hidden focus:border-[#1e3a5f] focus:ring-2 focus:ring-[#1e3a5f]/20 placeholder-slate-400 transition font-medium"
+                    placeholder="Nhập mật khẩu (Mặc định: 123456789)..."
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-500 hover:text-slate-300 transition"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-[#1e3a5f] transition cursor-pointer"
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
@@ -1247,31 +1405,33 @@ export default function App() {
               <button
                 type="submit"
                 disabled={isLoggingIn}
-                className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white rounded-xl text-xs font-bold transition shadow-md shadow-blue-500/15 cursor-pointer mt-2"
+                className="w-full py-3 bg-gradient-to-r from-[#1e3a5f] to-[#2a5d9f] hover:from-[#2a4d7a] hover:to-[#3b82f6] disabled:from-slate-300 disabled:to-slate-400 text-white rounded-xl text-sm font-bold transition-all shadow-lg shadow-[#1e3a5f]/20 cursor-pointer mt-2 font-display tracking-wide"
               >
-                {isLoggingIn ? 'Đang xác thực bảo mật...' : 'ĐĂNG NHẬP BẰNG TÀI KHOẢN'}
+                {isLoggingIn ? 'Đang xác thực bảo mật...' : 'ĐĂNG NHẬP HỆ THỐNG'}
               </button>
             </form>
 
-            <div className="relative flex items-center py-2">
-              <div className="flex-grow border-t border-slate-800"></div>
-              <span className="flex-shrink-0 mx-4 text-slate-500 text-xs font-medium uppercase tracking-widest">HOẶC</span>
-              <div className="flex-grow border-t border-slate-800"></div>
+            <div className="relative flex items-center py-1">
+              <div className="flex-grow border-t border-slate-100"></div>
+              <span className="flex-shrink-0 mx-4 text-slate-400 text-xs font-medium uppercase tracking-widest">HOẶC</span>
+              <div className="flex-grow border-t border-slate-100"></div>
             </div>
 
             <div className="space-y-4">
               <button
                 onClick={() => handleLoginSubmit(undefined, 'google')}
                 disabled={isLoggingIn}
-                className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-900 text-white rounded-xl text-xs font-bold transition shadow-md cursor-pointer mt-2 flex items-center justify-center gap-2 border border-slate-700"
+                className="w-full py-2.5 bg-white hover:bg-slate-50 disabled:bg-slate-100 text-slate-700 rounded-xl text-sm font-bold transition shadow-sm cursor-pointer flex items-center justify-center gap-2.5 border border-slate-200 hover:border-slate-300"
               >
+                <svg className="w-4 h-4" viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
                 {isLoggingIn ? 'Đang xác thực...' : 'Đăng nhập bằng Google'}
               </button>
             </div>
           </div>
 
+          {/* Footer */}
           <div className="text-center">
-            <span className="text-[10px] text-slate-600 font-medium">Hệ thống phân quyền 3 cấp độc lập • Education Group 2026</span>
+            <span className="text-[10px] text-slate-400 font-medium">© 2026 Trung Tâm Nghệ Thuật Aerobic Cầu Vồng • Hệ thống phân quyền 3 cấp độc lập</span>
           </div>
 
         </div>
@@ -1280,88 +1440,84 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 flex flex-col font-sans select-none overflow-hidden text-neutral-900" id="main_root">
+    <div className="min-h-screen bg-slate-50 flex flex-col font-sans select-none overflow-hidden text-neutral-900" id="main_root">
       
+      {/* RAINBOW TOP STRIPE — Signature brand element */}
+      <div className="h-1 cv-rainbow-bar shrink-0 btn-no-print"></div>
+
       {/* GLOBAL BRAND STICKY BAR HEADER */}
-      <nav className="bg-slate-950 text-white border-b border-white/5 py-4 px-6 flex flex-col md:flex-row md:items-center justify-between gap-4 z-50 shrink-0 select-none btn-no-print">
+      <nav className="bg-white text-slate-800 border-b border-slate-200 py-3 px-6 flex flex-col md:flex-row md:items-center justify-between gap-3 z-50 shrink-0 select-none btn-no-print shadow-sm">
         
         {/* Logo and meta details */}
         <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-blue-600 rounded-xl relative overflow-hidden flex items-center justify-center font-display font-extrabold text-white text-sm shadow-md shadow-blue-500/25 tracking-wider shrink-0 select-none">
-            ETMS
-            <div className="absolute inset-0 bg-white/10 skew-x-12 translate-x-5"></div>
+          <div className="w-11 h-11 rounded-full relative overflow-hidden flex items-center justify-center bg-white border-2 border-[#d4a843]/40 shadow-md shrink-0 select-none p-0.5">
+            <img src="/logo_cauvong.jpg" alt="Logo Cầu Vồng" className="w-full h-full object-contain rounded-full" />
           </div>
           <div>
-            <h1 className="text-sm font-bold tracking-tight text-white font-display flex items-center gap-1.5 leading-none">
-              Education Teacher Management System
-              <span className="text-[9px] bg-emerald-500/20 text-emerald-400 font-mono px-1.5 py-0.2 rounded font-bold uppercase">v3.1.5</span>
+            <h1 className="text-base font-bold tracking-tight text-[#1e3a5f] font-display flex items-center gap-2 leading-none">
+              Cầu Vồng ETMS
+              <span className="text-[9px] bg-emerald-50 text-emerald-600 font-mono px-1.5 py-0.5 rounded-full font-bold border border-emerald-200">v3.1.5</span>
               <button 
-                onClick={() => {
-                  const reloadWithCacheBust = () => {
-                    const url = new URL(window.location.href);
-                    url.searchParams.set('v', new Date().getTime().toString());
-                    window.location.href = url.toString();
-                  };
-                  if ('serviceWorker' in navigator) {
-                    navigator.serviceWorker.getRegistrations().then(function(registrations) {
-                      for(let registration of registrations) {
-                        registration.unregister();
-                      }
-                      reloadWithCacheBust();
-                    });
-                  } else {
-                    reloadWithCacheBust();
-                  }
+                onClick={async () => {
+                  try {
+                    localStorage.removeItem('etms_is_wiped');
+                    if ('caches' in window) {
+                      const keys = await caches.keys();
+                      for (const k of keys) await caches.delete(k);
+                    }
+                  } catch (e) {}
+                  const url = new URL(window.location.href);
+                  url.searchParams.set('v', new Date().getTime().toString());
+                  window.location.href = url.toString();
                 }}
-                className="text-[9px] bg-red-500/20 text-red-400 font-mono px-1.5 py-0.2 rounded font-bold hover:bg-red-500/40"
+                className="text-[9px] bg-rose-50 text-rose-500 font-mono px-1.5 py-0.5 rounded-full font-bold hover:bg-rose-100 cursor-pointer border border-rose-200 transition"
+                title="Bấm để làm mới toàn bộ dữ liệu mới nhất"
               >
                 LÀM MỚI BẢN CẬP NHẬT
               </button>
             </h1>
-            <p className="text-[10px] text-slate-400/80 mt-1">Hệ thống quản lý giáo viên, lịch dạy, tính lương tự động & Chống gian lận AI GPS</p>
+            <p className="text-[10px] text-slate-400 mt-1">Hệ thống quản lý giáo viên, lịch dạy, tính lương tự động & Chống gian lận AI GPS</p>
           </div>
         </div>
 
         {/* View Mode Switching Tabs and User Account Status */}
-        <div className="flex items-center flex-wrap gap-4 select-none">
+        <div className="flex items-center flex-wrap gap-3 select-none">
           
           {checkAdminAccess(currentUser) && (
-            <div className="bg-slate-900 p-1 rounded-xl border border-white/5 flex gap-1">
+            <div className="bg-slate-100 p-1 rounded-xl border border-slate-200 flex gap-1">
               <button
                 onClick={() => setViewMode('admin')}
                 className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold tracking-wide transition cursor-pointer select-none ${
                   viewMode === 'admin' 
-                    ? 'bg-blue-600 text-white shadow-sm' 
-                    : 'text-slate-400 hover:text-white'
+                    ? 'bg-gradient-to-r from-[#1e3a5f] to-[#2a5d9f] text-white shadow-sm' 
+                    : 'text-slate-500 hover:text-[#1e3a5f] hover:bg-white'
                 }`}
               >
                 <Laptop className="h-3.5 w-3.5" />
-                <span>Chỉ Hiện Web Admin</span>
+                <span>Web Admin</span>
               </button>
 
               <button
                 onClick={() => setViewMode('teacher')}
                 className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold tracking-wide transition cursor-pointer select-none ${
                   viewMode === 'teacher' 
-                    ? 'bg-blue-600 text-white shadow-sm' 
-                    : 'text-slate-400 hover:text-white'
+                    ? 'bg-gradient-to-r from-[#1e3a5f] to-[#2a5d9f] text-white shadow-sm' 
+                    : 'text-slate-500 hover:text-[#1e3a5f] hover:bg-white'
                 }`}
               >
                 <Smartphone className="h-3.5 w-3.5" />
-                <span>Chỉ Hiện Mobile Giáo Viên</span>
+                <span>Mobile Giáo Viên</span>
               </button>
             </div>
           )}
 
-
-
           {/* User Sign-In Info & Logout badge */}
-          <div className="flex items-center gap-3 bg-slate-900/80 px-4 py-1.5 rounded-2xl border border-white/5 shrink-0">
-            <div className="w-8 h-8 rounded-full bg-blue-600/20 text-blue-400 border border-blue-500/30 flex items-center justify-center font-bold text-sm tracking-wide">
+          <div className="flex items-center gap-3 bg-slate-50 px-4 py-1.5 rounded-2xl border border-slate-200 shrink-0">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#1e3a5f] to-[#2563eb] text-white flex items-center justify-center font-bold text-xs tracking-wide shadow-sm">
               {currentUser?.username.substring(0, 2).toUpperCase()}
             </div>
             <div className="text-left hidden sm:block">
-              <div className="text-xs font-bold text-slate-100 flex items-center gap-1">
+              <div className="text-xs font-bold text-slate-700 flex items-center gap-1">
                 <span>{currentUser?.username}</span>
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
               </div>
@@ -1371,7 +1527,7 @@ export default function App() {
             </div>
             <button
               onClick={handleLogout}
-              className="p-1.5 hover:bg-white/10 text-slate-400 hover:text-rose-400 rounded-lg transition cursor-pointer ml-1"
+              className="p-1.5 hover:bg-rose-50 text-slate-400 hover:text-rose-500 rounded-lg transition cursor-pointer ml-1 border border-transparent hover:border-rose-200"
               title="Đăng xuất khỏi hệ thống"
             >
               <LogOut className="h-4 w-4" />
@@ -1382,66 +1538,99 @@ export default function App() {
       </nav>
 
       {/* RENDER BODY CONTAINER BY VIEW MODE */}
-      <div className="flex-1 flex overflow-hidden bg-slate-900 relative">
+      <div className="flex-1 flex overflow-hidden bg-slate-50 relative">
         
         {/* VIEWMODE 2: ONLY ADMIN WORKSPACE */}
         {viewMode === 'admin' && (
           <div className="w-full h-full flex flex-col bg-white overflow-hidden">
-            <AdminDashboard 
-              teachers={state.teachers}
-              schools={state.schools}
-              classes={state.classes}
-              schedules={state.schedules}
-              attendance={state.attendance}
-              changes={state.changes}
-              auditLogs={state.auditLogs}
-              notifications={state.notifications}
-              users={state.users}
-              meetingAttendance={state.meetingAttendance}
-              settings={state.settings}
-              currentUser={currentUser}
-              onSyncState={syncState}
-              onUpdateTeachers={handleUpdateTeachers}
-              onUpdateSchools={handleUpdateSchools}
-              onUpdateClasses={handleUpdateClasses}
-              onUpdateSchedules={handleUpdateSchedules}
-              onUpdateAttendance={handleUpdateAttendance}
-              onUpdateChanges={handleUpdateChanges}
-              onUpdateUsers={handleUpdateUsers}
-              onUpdateMeetingAttendance={handleUpdateMeetingAttendance}
-              onUpdateSettings={handleUpdateSettings}
-              onAddAuditLog={handleAddAuditLog}
-              onAddNotification={handleAddNotification}
-              onBulkSync={handleBulkSync}
-              schoolCancellations={state.schoolCancellations}
-              onUpdateSchoolCancellations={handleUpdateSchoolCancellations}
-            />
+            <React.Suspense fallback={
+              <div className="flex-1 flex flex-col items-center justify-center p-8 bg-gradient-to-br from-[#fefcf9] via-white to-[#f0f4ff] text-[#1e3a5f] min-h-[500px] select-none relative overflow-hidden">
+                <div className="cv-logo-ring mb-5">
+                  <div className="w-20 h-20 rounded-full overflow-hidden bg-white shadow-lg">
+                    <img 
+                      src="/logo_cauvong.jpg" 
+                      alt="Cầu Vồng Logo" 
+                      className="w-full h-full object-contain"
+                    />
+                  </div>
+                </div>
+                <h3 className="text-base font-extrabold text-[#1e3a5f] tracking-tight font-display">
+                  Đang tải không gian làm việc Quản Trị...
+                </h3>
+                <p className="text-xs text-slate-500 font-medium mt-1 animate-pulse">
+                  Đang tối ưu nạp các module quản lý
+                </p>
+                <div className="w-36 h-1 bg-slate-100 rounded-full overflow-hidden relative mt-4">
+                  <div className="absolute top-0 bottom-0 left-0 cv-rainbow-bar w-1/2 rounded-full animate-progress-loading"></div>
+                </div>
+              </div>
+            }>
+              <AdminDashboard 
+                teachers={state.teachers}
+                schools={state.schools}
+                classes={state.classes}
+                schedules={state.schedules}
+                attendance={state.attendance}
+                changes={state.changes}
+                auditLogs={state.auditLogs}
+                notifications={state.notifications}
+                users={state.users}
+                meetingAttendance={state.meetingAttendance}
+                settings={state.settings}
+                currentUser={currentUser}
+                onSyncState={syncState}
+                onUpdateTeachers={handleUpdateTeachers}
+                onUpdateSchools={handleUpdateSchools}
+                onUpdateClasses={handleUpdateClasses}
+                onUpdateSchedules={handleUpdateSchedules}
+                onUpdateAttendance={handleUpdateAttendance}
+                onUpdateChanges={handleUpdateChanges}
+                onUpdateUsers={handleUpdateUsers}
+                onUpdateMeetingAttendance={handleUpdateMeetingAttendance}
+                onUpdateSettings={handleUpdateSettings}
+                onAddAuditLog={handleAddAuditLog}
+                onAddNotification={handleAddNotification}
+                onBulkSync={handleBulkSync}
+                schoolCancellations={state.schoolCancellations}
+                onUpdateSchoolCancellations={handleUpdateSchoolCancellations}
+              />
+            </React.Suspense>
           </div>
         )}
 
         {/* VIEWMODE 3: ONLY TEACHER DEVICE SIMULATOR */}
         {viewMode === 'teacher' && (
           <div className="w-full h-full flex flex-col overflow-y-auto bg-slate-50">
-            <TeacherDashboard 
-              teachers={state.teachers}
-              schools={state.schools}
-              classes={state.classes}
-              schedules={state.schedules}
-              attendance={state.attendance}
-              changes={state.changes}
-              settings={state.settings}
-              currentUser={currentUser}
-              onUpdateSchools={handleUpdateSchools}
-              onUpdateClasses={handleUpdateClasses}
-              onUpdateSchedules={handleUpdateSchedules}
-              onUpdateAttendance={handleUpdateAttendance}
-              onUpdateChanges={handleUpdateChanges}
-              onAddAuditLog={handleAddAuditLog}
-              onAddNotification={handleAddNotification}
-              quickAnnouncement={state.quickAnnouncement}
-              schoolCancellations={state.schoolCancellations}
-              onUpdateSchoolCancellations={handleUpdateSchoolCancellations}
-            />
+            {state.teachers.length === 0 ? (
+              <div className="flex-1 min-h-[400px] flex flex-col items-center justify-center p-6 text-center select-none">
+                <div className="w-14 h-14 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mb-3 shadow-inner">
+                  <RefreshCw className="w-7 h-7 animate-spin" />
+                </div>
+                <h3 className="text-sm font-bold text-slate-700">Đang đồng bộ hồ sơ giáo viên...</h3>
+                <p className="text-xs text-slate-400 mt-1 max-w-xs">Hệ thống đang tải dữ liệu thời khóa biểu mới nhất từ máy chủ.</p>
+              </div>
+            ) : (
+              <TeacherDashboard 
+                teachers={state.teachers}
+                schools={state.schools}
+                classes={state.classes}
+                schedules={state.schedules}
+                attendance={state.attendance}
+                changes={state.changes}
+                settings={state.settings}
+                currentUser={currentUser}
+                onUpdateSchools={handleUpdateSchools}
+                onUpdateClasses={handleUpdateClasses}
+                onUpdateSchedules={handleUpdateSchedules}
+                onUpdateAttendance={handleUpdateAttendance}
+                onUpdateChanges={handleUpdateChanges}
+                onAddAuditLog={handleAddAuditLog}
+                onAddNotification={handleAddNotification}
+                quickAnnouncement={state.quickAnnouncement}
+                schoolCancellations={state.schoolCancellations}
+                onUpdateSchoolCancellations={handleUpdateSchoolCancellations}
+              />
+            )}
           </div>
         )}
 

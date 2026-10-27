@@ -13,7 +13,13 @@ export interface Teacher {
   socialInsurance?: number; // BHXH (VNĐ)
   advanceSalary?: number; // Ứng lương (VNĐ)
   bonusPeriodsJSON?: string;
+  attendanceBonusOverrideJSON?: string;
   notes: string;
+  facebookPsid?: string;
+  facebookName?: string;
+  facebookConnectedAt?: string;
+  notificationToken?: string;
+  notificationTokenExpires?: string;
   isDeleted?: boolean;
   deletedAt?: string;
 }
@@ -78,12 +84,13 @@ export interface AttendanceLog {
   isFlagged: boolean; // Trạng thái cảnh báo gian lận
   flagReason?: string;
   confirmedByAdmin: boolean;
+  hasSelfie?: boolean;
 }
 
 export interface ChangeRequest {
   id: string;
   teacherId: string;
-  requestType: 'sick_leave' | 'swap_shift' | 'substitute_teacher' | 'art_performance';
+  requestType: 'sick_leave' | 'swap_shift' | 'emergency_swap' | 'substitute_teacher' | 'art_performance';
   date: string; // Ngày xin phép
   session: string;
   originalTeacherId: string;
@@ -93,6 +100,7 @@ export interface ChangeRequest {
   status: 'pending' | 'approved' | 'rejected';
   createdAt: string;
   adminNotes?: string;
+  proofImage?: string;
 }
 
 export interface SystemNotification {
@@ -137,4 +145,8 @@ export interface AppSettings {
   allowTeacherScheduleEdit: boolean;
   allowTeacherUpdateSchoolLocation?: boolean;
   requireSelfieCheckIn?: boolean;
+  fbPageUrl?: string;
+  fbPageAccessToken?: string;
+  fbVerifyToken?: string;
+  fbAutoReminderEnabled?: boolean;
 }

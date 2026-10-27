@@ -1,11 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   User, Calendar, Clock, DollarSign, ArrowLeftRight, Check, AlertCircle, Bell, 
-  MapPin, Camera, QrCode, Sparkles, Send, ShieldAlert, Smartphone, CheckCircle, RefreshCw, Edit2, X, Save, Image as ImageIcon, Building, CalendarPlus
+  MapPin, Camera, QrCode, Sparkles, Send, ShieldAlert, Smartphone, CheckCircle, RefreshCw, Edit2, X, Save, Image as ImageIcon, Building, CalendarPlus,
+  Target, TrendingUp, Award, Download, Share2, Copy, BarChart3, Paperclip, Eye, Upload, ZoomIn, ChevronDown, ChevronUp, CheckCircle2, RotateCcw,
+  MessageCircle
 } from 'lucide-react';
 import { Teacher, School, ClassInfo, Schedule, AttendanceLog, ChangeRequest, SystemNotification, AppUser, AppSettings } from '../types';
 import { calculateDistance } from '../utils/localStorage';
 import { getAccurateCurrentPosition } from '../utils/gps';
+import TeacherDayPollModal from './TeacherDayPollModal';
 
 interface TeacherDashboardProps {
   teachers: Teacher[];
@@ -35,11 +38,11 @@ const getSessionCategory = (sess: string) => {
   if (timeMatch) {
      let hour = parseInt(timeMatch[1], 10);
      const min = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
-     if (s.includes('chiều') && hour < 12) hour += 12;
+     if ((s.includes('chiều') || s.includes('chieu') || s.includes('pm') || s.includes('p.m')) && hour < 12) hour += 12;
      minutes = hour * 60 + min;
-  } else if (s === 'morning' || s.includes('sáng')) {
+  } else if (s === 'morning' || s.includes('sáng') || s.includes('sang') || s.includes('am')) {
      minutes = 6 * 60;
-  } else if (s === 'afternoon' || s.includes('chiều')) {
+  } else if (s === 'afternoon' || s.includes('chiều') || s.includes('chieu') || s.includes('pm')) {
      minutes = 13 * 60;
   }
   return minutes < 12 * 60 ? 'morning' : 'afternoon';
@@ -81,6 +84,40 @@ export default function TeacherDashboard({
   // Current active teacher simulator state
   const [selectedTeacherId, setSelectedTeacherId] = useState<string>('');
   const [lastReadQaId, setLastReadQaId] = useState(() => localStorage.getItem('read_qa_id') || '');
+  const [isQaDismissedTemp, setIsQaDismissedTemp] = useState(false);
+
+  // [NÂNG CẤP MỤC 7]: TRẠNG THÁI NGOẠI TUYẾN & ĐỒNG BỘ CHẤM CÔNG OFFLINE
+  const [isNetworkOnline, setIsNetworkOnline] = useState(() => typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [offlinePendingCount, setOfflinePendingCount] = useState(() => {
+    try {
+      const raw = localStorage.getItem('cauvong_offline_attendance_queue');
+      if (!raw) return 0;
+      const q = JSON.parse(raw);
+      return Array.isArray(q?.upsert) ? q.upsert.length : 0;
+    } catch { return 0; }
+  });
+
+  useEffect(() => {
+    const updateNetStatus = () => setIsNetworkOnline(navigator.onLine);
+    const handleOfflineStatus = (e: any) => {
+      if (typeof e.detail?.count === 'number') {
+        setOfflinePendingCount(e.detail.count);
+      }
+      if (e.detail?.synced) {
+        customAlert('Thành công', '✅ Đã đồng bộ thành công ca chấm công ngoại tuyến lên máy chủ Cầu Vồng!');
+      }
+    };
+
+    window.addEventListener('online', updateNetStatus);
+    window.addEventListener('offline', updateNetStatus);
+    window.addEventListener('cauvong_offline_status_change', handleOfflineStatus);
+
+    return () => {
+      window.removeEventListener('online', updateNetStatus);
+      window.removeEventListener('offline', updateNetStatus);
+      window.removeEventListener('cauvong_offline_status_change', handleOfflineStatus);
+    };
+  }, []);
   
   const rawPerms = typeof currentUser?.permissions === 'string' 
     ? (() => { try { return JSON.parse(currentUser.permissions || '[]'); } catch { return []; } })() 
@@ -90,21 +127,61 @@ export default function TeacherDashboard({
   const canViewAllTeachers = currentUser?.role === 'admin' || userPermsArray.includes('can_view_all_teachers');
   const canViewAllSchedules = currentUser?.role === 'admin' || userPermsArray.includes('can_view_all_schedules') || userPermsArray.includes('can_edit_schedule');
   const isRestrictedView = !canViewAllSchedules;
-  const allowedTeachers = teachers.filter(t => !t.isDeleted && (!isRestrictedView || t.id === currentUser?.teacherId));
-  const currentTeacher = allowedTeachers.find(t => t.id === selectedTeacherId) || allowedTeachers[0] || null;
+  const effectiveTeacherId = currentUser?.teacherId || teachers.find(t => !t.isDeleted && (
+    t.id === currentUser?.username || 
+    t.name.toLowerCase() === currentUser?.username?.toLowerCase() ||
+    (currentUser?.username && (
+      t.id.toLowerCase().replace(/[^a-z0-9]/g, '') === currentUser.username.toLowerCase().replace(/[^a-z0-9]/g, '') ||
+      t.id.toLowerCase().replace(/^gv_?/, '') === currentUser.username.toLowerCase().replace(/^gv_?/, '') ||
+      t.id.toLowerCase().replace(/^gv_?(mr|ms)_?/, '') === currentUser.username.toLowerCase().replace(/^gv_?(mr|ms)_?/, '') ||
+      currentUser.username.toLowerCase().includes(t.id.toLowerCase().replace(/^gv_?(mr|ms)_?/, ''))
+    ))
+  ))?.id;
+  const rawAllowed = teachers.filter(t => !t.isDeleted && (!isRestrictedView || t.id === effectiveTeacherId));
+  // Fallback an toàn: nếu chưa khớp do chữ hoa/thường hoặc thiếu prefix GV_
+  const fallbackAllowed = rawAllowed.length > 0 
+    ? rawAllowed 
+    : teachers.filter(t => !t.isDeleted && currentUser?.username && (
+        t.id.toLowerCase() === currentUser.username.toLowerCase() ||
+        t.id.toLowerCase().replace(/^gv_?/, '') === currentUser.username.toLowerCase().replace(/^gv_?/, '') ||
+        t.id.toLowerCase().replace(/^gv_?(mr|ms)_?/, '') === currentUser.username.toLowerCase().replace(/^gv_?(mr|ms)_?/, '') ||
+        ((currentUser as any)?.name && t.name.toLowerCase() === (currentUser as any).name.toLowerCase())
+      ));
+  // Bảo mật tuyệt đối: Nếu là giáo viên (isRestrictedView) mà chưa liên kết hồ sơ, không bao giờ fallback ra toàn bộ danh sách để tránh nhảy sang thầy An
+  const allowedTeachers = fallbackAllowed.length > 0 
+    ? fallbackAllowed 
+    : (isRestrictedView ? [] : teachers.filter(t => !t.isDeleted));
+
+  const currentTeacher = allowedTeachers.find(t => t.id === selectedTeacherId) || (isRestrictedView && effectiveTeacherId ? allowedTeachers.find(t => t.id === effectiveTeacherId) : null) || allowedTeachers[0] || (!isRestrictedView ? (teachers.find(t => !t.isDeleted) || teachers[0] || null) : null);
+  const isViewingSelf = currentTeacher?.id === currentUser?.teacherId;
+  const isTeacherJoined = Boolean(
+    currentTeacher?.notificationToken && 
+    currentTeacher.notificationToken !== '' && 
+    currentTeacher.notificationToken !== 'null'
+  );
 
   // Auto-select first teacher if state is empty and a new teacher is added
   useEffect(() => {
-    if (!selectedTeacherId) {
-      if (currentUser?.teacherId && allowedTeachers.some(t => t.id === currentUser.teacherId)) {
-        setSelectedTeacherId(currentUser.teacherId);
-      } else if (allowedTeachers.length > 0) {
+    if (isRestrictedView) {
+      // Với giáo viên thông thường: Bắt buộc chỉ xem chính mình
+      if (effectiveTeacherId && allowedTeachers.some(t => t.id === effectiveTeacherId)) {
+        if (selectedTeacherId !== effectiveTeacherId) {
+          setSelectedTeacherId(effectiveTeacherId);
+        }
+      }
+    } else {
+      // Với Admin hoặc người có quyền xem tất cả giáo viên: Tự do chọn giáo viên khác từ dropdown
+      if (!selectedTeacherId) {
+        if (effectiveTeacherId && allowedTeachers.some(t => t.id === effectiveTeacherId)) {
+          setSelectedTeacherId(effectiveTeacherId);
+        } else if (allowedTeachers.length > 0) {
+          setSelectedTeacherId(allowedTeachers[0].id);
+        }
+      } else if (allowedTeachers.length > 0 && !allowedTeachers.some(t => t.id === selectedTeacherId)) {
         setSelectedTeacherId(allowedTeachers[0].id);
       }
-    } else if (allowedTeachers.length > 0 && !allowedTeachers.some(t => t.id === selectedTeacherId)) {
-      setSelectedTeacherId(allowedTeachers[0].id);
     }
-  }, [allowedTeachers, selectedTeacherId, currentUser]);
+  }, [allowedTeachers, selectedTeacherId, currentUser, effectiveTeacherId, isRestrictedView]);
 
   // Mobile navigation tabs inside smartphone framework
   const [mobileTab, setMobileTab] = useState<'home' | 'schedule' | 'checkin' | 'salary' | 'swap' | 'substitute_tab' | 'school' | 'account'>('home');
@@ -230,19 +307,21 @@ export default function TeacherDashboard({
 
   // Active schedule selected for check-in
   const [selectedScheduleId, setSelectedScheduleId] = useState<string>('');
+  const [selectedCheckinScheduleIds, setSelectedCheckinScheduleIds] = useState<string[]>([]);
 
   // Selfie camera state
   const [capturedImage, setCapturedImage] = useState<string>('');
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // QR confirmation
   const [scannedQR, setScannedQR] = useState<string>('');
   const [isScanningQR, setIsScanningQR] = useState<boolean>(false);
 
   // Shift substitution form states
-  const [reqType, setReqType] = useState<'sick_leave' | 'swap_shift' | 'substitute_teacher'>('substitute_teacher');
+  const [reqType, setReqType] = useState<'sick_leave' | 'swap_shift' | 'emergency_swap' | 'substitute_teacher' | 'art_performance'>('substitute_teacher');
   const [reqDate, setReqDate] = useState<string>('');
   const [reqSession, setReqSession] = useState<string>('morning');
   const [reqReason, setReqReason] = useState<string>('');
@@ -250,12 +329,18 @@ export default function TeacherDashboard({
   const [reqStatusMessage, setReqStatusMessage] = useState<string>('');
   const [substituteMode, setSubstituteMode] = useState<'regular' | 'past_leave'>('regular');
   const [selectedPastLeaveIds, setSelectedPastLeaveIds] = useState<string[]>([]);
+  const [emergencySubMode, setEmergencySubMode] = useState<'has_substitute' | 'no_substitute'>('has_substitute');
+  const [emergencyTargetTeacherId, setEmergencyTargetTeacherId] = useState<string>('');
+  const [substituteTargetTeacherId, setSubstituteTargetTeacherId] = useState<string>('');
 
-  // Alarms
-  const [activeAlarms, setActiveAlarms] = useState<Record<string, number>>({});
-  const [editingAlarm, setEditingAlarm] = useState<{ id: string, timeString: string } | null>(null);
-  const [editingMinutes, setEditingMinutes] = useState<number>(30);
-  
+  // Proof Image State for Change Requests
+  const [proofImagePreview, setProofImagePreview] = useState<string>('');
+  const [isCompressingProof, setIsCompressingProof] = useState<boolean>(false);
+  const [selectedProofModal, setSelectedProofModal] = useState<{ url: string; title: string } | null>(null);
+
+  // KPI & Teaching Progress State
+  const [showKpiDetails, setShowKpiDetails] = useState<boolean>(false);
+
   // Schedule Edit
   const [editingScheduleItem, setEditingScheduleItem] = useState<Schedule | null>(null);
 
@@ -314,80 +399,123 @@ export default function TeacherDashboard({
     }
   }, [currentTeacher, onAddNotification]);
 
-  const saveAlarm = () => {
-    if (!editingAlarm) return;
-    setActiveAlarms(prev => ({ ...prev, [editingAlarm.id]: editingMinutes }));
-    onAddNotification('Báo thức đã bật', `Hệ thống sẽ báo trước ${editingMinutes} phút khi đến ca dạy lúc ${editingAlarm.timeString}`, 'success');
-    setEditingAlarm(null);
-  };
-
-  const removeAlarm = (scheduleId: string, time: string) => {
-    setActiveAlarms(prev => {
-      const next = { ...prev };
-      delete next[scheduleId];
-      return next;
-    });
-    onAddNotification('Báo thức đã tắt', `Đã tắt báo thức ca dạy lúc ${time}`, 'warning');
-  };
-
   const [schoolClosedModalSchedule, setSchoolClosedModalSchedule] = useState<Schedule | null>(null);
+  const [selectedCancelScheduleIds, setSelectedCancelScheduleIds] = useState<string[]>([]);
   const [closedType, setClosedType] = useState<'arrived' | 'notified'>('arrived');
+  const [closedReason, setClosedReason] = useState<string>('');
   const [submittingClosed, setSubmittingClosed] = useState(false);
 
   const handleOpenSchoolClosedModal = (sc: Schedule) => {
     setSchoolClosedModalSchedule(sc);
+    setSelectedCancelScheduleIds([sc.id]);
     setClosedType('arrived');
+    setClosedReason('Trường báo nghỉ');
   };
 
   const handleSubmitSchoolClosed = async () => {
-    if (!schoolClosedModalSchedule || !currentTeacher) return;
+    if (!schoolClosedModalSchedule || !currentTeacher || selectedCancelScheduleIds.length === 0) return;
     setSubmittingClosed(true);
     try {
-      const payload = {
-        date: todayStr,
-        scheduleId: schoolClosedModalSchedule.id,
-        teacherId: currentTeacher.id,
-        schoolId: schoolClosedModalSchedule.schoolId,
-        classId: schoolClosedModalSchedule.classId,
-        session: schoolClosedModalSchedule.session,
-        cancellationType: closedType,
-        periodsCredited: closedType === 'arrived' ? 1 : 0,
-        reason: ''
-      };
+      const selectedSchedules = todaySchedules.filter(s => selectedCancelScheduleIds.includes(s.id));
+      if (selectedSchedules.length === 0) {
+        customAlert('Thông báo', 'Vui lòng chọn ít nhất 1 tiết/lớp để báo nghỉ!');
+        setSubmittingClosed(false);
+        return;
+      }
 
-      const res = await fetch('/api/school-cancellations', {
+      const newRecords: any[] = [];
+      const creditedSessions = new Set<string>();
+      for (let i = 0; i < selectedSchedules.length; i++) {
+        const sc = selectedSchedules[i];
+        const sessCat = getSessionCategory(sc.session);
+        const sessKey = `${sc.schoolId}_${sessCat}`;
+        const isFirstInSession = !creditedSessions.has(sessKey);
+        if (closedType === 'arrived' && isFirstInSession) {
+          creditedSessions.add(sessKey);
+        }
+        newRecords.push({
+          id: `CAN_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 5)}`,
+          date: todayStr,
+          scheduleId: sc.id,
+          teacherId: currentTeacher.id,
+          schoolId: sc.schoolId,
+          classId: sc.classId,
+          session: sc.session,
+          cancellationType: closedType,
+          periodsCredited: (closedType === 'arrived' && isFirstInSession) ? 1.0 : 0.0,
+          reason: closedReason.trim() || 'Trường báo nghỉ',
+          createdAt: new Date().toISOString()
+        });
+      }
+
+      const res = await fetch('/api/school-cancellations/bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ upsert: newRecords })
       });
 
       if (res.ok) {
-        const newCancellation = await res.json();
-        onUpdateSchoolCancellations([...schoolCancellations, newCancellation]);
+        const selectedIdsSet = new Set(selectedCancelScheduleIds);
+        const selectedClassIdsSet = new Set(selectedSchedules.map(s => s.classId));
         
+        // Loại bỏ các bản ghi cũ của các tiết được chọn
+        const filteredOld = (schoolCancellations || []).filter(c => 
+          !(c.teacherId === currentTeacher.id && c.date === todayStr && (selectedIdsSet.has(c.scheduleId) || (c.schoolId === schoolClosedModalSchedule.schoolId && selectedClassIdsSet.has(c.classId))))
+        );
+        onUpdateSchoolCancellations([...filteredOld, ...newRecords]);
+        
+        const classNamesStr = selectedSchedules.map(s => getClassName(s.classId)).join(', ');
         onAddAuditLog(
           'Báo trường nghỉ', 
           currentTeacher.name, 
-          `Báo trường nghỉ ca ${schoolClosedModalSchedule.session === 'morning' ? 'Sáng' : 'Chiều'} ngày ${todayStr} (${closedType === 'arrived' ? 'Đã tới trường' : 'Báo trước'})`
+          `Báo trường nghỉ ${selectedSchedules.length} tiết (Lớp: ${classNamesStr}) trường ${getSchoolName(schoolClosedModalSchedule.schoolId, schoolClosedModalSchedule)} ngày ${todayStr} (${closedType === 'arrived' ? 'Đã tới trường (+1 tiết)' : 'Báo trước'}). Lý do: ${closedReason.trim() || 'Trường báo nghỉ'}`
         );
         
         onAddNotification(
           'Báo Trường Nghỉ mới 🚫',
-          `Giáo viên ${currentTeacher.name} báo Trường Nghỉ ca ${schoolClosedModalSchedule.session === 'morning' ? 'Sáng' : 'Chiều'} ngày ${todayStr} (${closedType === 'arrived' ? 'Đã tới trường (+1 tiết)' : 'Được báo trước'}).`,
+          `Giáo viên ${currentTeacher.name} báo Trường Nghỉ ${selectedSchedules.length} tiết (Lớp: ${classNamesStr}) trường ${getSchoolName(schoolClosedModalSchedule.schoolId, schoolClosedModalSchedule)} ngày ${todayStr}. Lý do: ${closedReason.trim() || 'Trường báo nghỉ'}`,
           'warning'
         );
 
-        customAlert('Thành công', 'Đã ghi nhận thông tin trường nghỉ.');
+        customAlert('Thành công', `Đã ghi nhận thông tin trường báo nghỉ cho ${selectedSchedules.length} tiết (${classNamesStr}) thành công! Các tiết này đã được chuyển thành trạng thái Rảnh Ca.`);
         setSchoolClosedModalSchedule(null);
       } else {
-        customAlert('Thất bại', 'Không thể gửi yêu cầu báo nghỉ.');
+        const errData = await res.json().catch(() => ({}));
+        customAlert('Thất bại', errData.error || 'Không thể gửi yêu cầu báo nghỉ. Vui lòng thử lại!');
       }
-    } catch (e) {
-      console.error(e);
-      customAlert('Lỗi', 'Đã xảy ra lỗi kết nối.');
+    } catch (e: any) {
+      console.error('Submit school closed error:', e);
+      customAlert('Lỗi kết nối', 'Đã xảy ra lỗi kết nối khi gửi yêu cầu báo trường nghỉ: ' + (e?.message || ''));
     } finally {
       setSubmittingClosed(false);
     }
+  };
+
+  const handleCancelSchoolClosed = async (cancellationId: string, sc: Schedule) => {
+    setConfirmModal({
+      title: 'Hủy báo trường nghỉ?',
+      message: `Bạn có chắc chắn muốn hủy trạng thái báo nghỉ của lớp "${getClassName(sc.classId)}" để quay lại trạng thái dạy và điểm danh bình thường?`,
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/school-cancellations/${cancellationId}`, { method: 'DELETE' });
+          if (res.ok) {
+            const updated = (schoolCancellations || []).filter(c => c.id !== cancellationId);
+            onUpdateSchoolCancellations(updated);
+            onAddAuditLog(
+              'Hủy báo trường nghỉ',
+              currentTeacher?.name || 'Giáo viên',
+              `Hủy báo nghỉ lớp ${getClassName(sc.classId)} trường ${getSchoolName(sc.schoolId, sc)} ngày ${todayStr}`
+            );
+            customAlert('Thành công', `Đã hủy báo nghỉ lớp "${getClassName(sc.classId)}"! Thầy/Cô có thể tiến hành Điểm danh dạy học.`);
+          } else {
+            customAlert('Lỗi', 'Không thể hủy báo trường nghỉ. Vui lòng thử lại!');
+          }
+        } catch (err: any) {
+          console.error('Cancel school closed error:', err);
+          customAlert('Lỗi kết nối', 'Không thể kết nối đến máy chủ: ' + (err?.message || ''));
+        }
+      }
+    });
   };
 
   // Dynamic calculations based on selected simulation coordinates
@@ -434,12 +562,54 @@ export default function TeacherDashboard({
     );
     
     todaySubRequests.forEach(req => {
-      const originalSchedules = schedules.filter(s => 
-        !s.isDeleted &&
-        s.teacherId === req.originalTeacherId && 
-        s.dayOfWeek === currentDayOfWeek && 
-        getSessionCategory(s.session) === req.session
-      );
+      let originalSchedules: Schedule[] = [];
+
+      if (req.targetScheduleId && req.targetScheduleId.trim()) {
+        const itemIds = req.targetScheduleId.split(',').map(s => s.trim()).filter(Boolean);
+        itemIds.forEach(itemId => {
+          if (itemId.startsWith('missed_')) {
+            const parts = itemId.split('_');
+            const schedId = parts.slice(1, parts.length - 1).join('_');
+            const s = schedules.find(x => x.id === schedId && !x.isDeleted && x.teacherId === req.originalTeacherId);
+            if (s) originalSchedules.push(s);
+          } else if (itemId.startsWith('leave_')) {
+            const reqId = itemId.replace('leave_', '');
+            const parts = reqId.split('_');
+            if (parts.length > 1) {
+              const schedId = parts.slice(1).join('_');
+              const s = schedules.find(x => x.id === schedId && !x.isDeleted && x.teacherId === req.originalTeacherId);
+              if (s) originalSchedules.push(s);
+            } else {
+              const origReq = changes.find(c => c.id === reqId);
+              if (origReq) {
+                const [y, m, d] = origReq.date.split('-');
+                const reqDateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+                const reqDayOfWeek = reqDateObj.getDay() === 0 ? 8 : reqDateObj.getDay() + 1;
+                const dayScheds = schedules.filter(s => 
+                  !s.isDeleted && 
+                  s.teacherId === origReq.originalTeacherId && 
+                  s.dayOfWeek === reqDayOfWeek && 
+                  getSessionCategory(s.session) === origReq.session
+                );
+                originalSchedules.push(...dayScheds);
+              }
+            }
+          } else {
+            const s = schedules.find(x => x.id === itemId && !x.isDeleted && x.teacherId === req.originalTeacherId);
+            if (s) originalSchedules.push(s);
+          }
+        });
+      }
+      
+      if (originalSchedules.length === 0) {
+        originalSchedules = schedules.filter(s => 
+          !s.isDeleted &&
+          s.teacherId === req.originalTeacherId && 
+          s.dayOfWeek === currentDayOfWeek && 
+          getSessionCategory(s.session) === getSessionCategory(req.session)
+        );
+      }
+
       originalSchedules.forEach(subSched => {
         if (!todaySchedules.find(ts => ts.id === subSched.id)) {
            // We clone it and attach a flag just for the UI so Teacher knows it's a sub shift
@@ -504,6 +674,20 @@ export default function TeacherDashboard({
     }
   }, [locationSimulation, selectedScheduleId, targetSchool]);
 
+  useEffect(() => {
+    if (selectedSchedule) {
+      const shiftScheds = todaySchedules.filter(s => 
+        getSessionShort(s.session) === getSessionShort(selectedSchedule.session) && 
+        (s.schoolId === selectedSchedule.schoolId || (getSchoolName(s.schoolId, s).trim().toLowerCase() === getSchoolName(selectedSchedule.schoolId, selectedSchedule).trim().toLowerCase())) &&
+        !attendance.some(a => a.teacherId === currentTeacher?.id && a.date === todayStr && a.scheduleId === s.id) &&
+        !schoolCancellations.some(c => c.teacherId === currentTeacher?.id && c.date === todayStr && (c.scheduleId === s.id || (c.schoolId === s.schoolId && c.classId === s.classId)))
+      );
+      setSelectedCheckinScheduleIds(shiftScheds.map(s => s.id));
+    } else {
+      setSelectedCheckinScheduleIds([]);
+    }
+  }, [selectedScheduleId, todayStr, attendance.length, schoolCancellations.length]);
+
   // Handle webcam selfie activation
   const startCamera = async () => {
     setIsCameraActive(true);
@@ -548,19 +732,26 @@ export default function TeacherDashboard({
     }
   };
 
-  const captureSelfiePhoto = () => {
+  const takeSnapshotFromVideo = (): string | null => {
     if (videoRef.current && canvasRef.current) {
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      canvas.width = 300;
-      canvas.height = 300;
+      canvas.width = 320;
+      canvas.height = 320;
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        ctx.drawImage(video, 0, 0, 300, 300);
-        const dataUrl = canvas.toDataURL('image/png');
-        setCapturedImage(dataUrl);
-        stopCamera();
+        ctx.drawImage(video, 0, 0, 320, 320);
+        return canvas.toDataURL('image/jpeg', 0.85);
       }
+    }
+    return null;
+  };
+
+  const captureSelfiePhoto = () => {
+    const dataUrl = takeSnapshotFromVideo();
+    if (dataUrl) {
+      setCapturedImage(dataUrl);
+      stopCamera();
     } else {
       // Fallback cartoon avatar
       const avatars = [
@@ -574,6 +765,29 @@ export default function TeacherDashboard({
       setCapturedImage(selectedAvatar);
       setIsCameraActive(false);
     }
+  };
+
+  const handleSelfieFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = canvasRef.current || document.createElement('canvas');
+        canvas.width = 320;
+        canvas.height = 320;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, 320, 320);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+          setCapturedImage(dataUrl);
+          stopCamera();
+        }
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
   };
 
   const stopCamera = () => {
@@ -653,8 +867,20 @@ export default function TeacherDashboard({
     //   return;
     // }
 
-    if (settings?.requireSelfieCheckIn !== false && !capturedImage) {
-      customAlert('Thông báo', "❌ YÊU CẦU BẮT BUỘC: Bạn buộc phải chụp một tấm ảnh Selfie thực tế tại cơ quan trước khi hệ thống ghi nhận thời lượng dạy do tính năng định vị vị trí tạm thời bị ADMIN khoá!");
+    let finalSelfieImage = capturedImage;
+
+    // Tự động chụp nếu camera đang bật mà giáo viên chưa nhấn nút "Bấm Chụp Ảnh"
+    if (!finalSelfieImage && isCameraActive) {
+      const autoSnapped = takeSnapshotFromVideo();
+      if (autoSnapped) {
+        finalSelfieImage = autoSnapped;
+        setCapturedImage(autoSnapped);
+        stopCamera();
+      }
+    }
+
+    if (settings?.requireSelfieCheckIn !== false && !finalSelfieImage) {
+      customAlert('Thông báo', "❌ YÊU CẦU BẮT BUỘC: Bạn hãy nhấn 'Kích Hoạt Camera' (hoặc 'Tải Ảnh') để chụp ảnh Selfie xác thực tại trường trước khi nộp chấm công!");
       return;
     }
 
@@ -715,26 +941,45 @@ export default function TeacherDashboard({
     if (isLateFlagged) lateReason = `Chấm công TRỄ. Giờ vào lớp quy định là ${limitHour.toString().padStart(2, '0')}:${limitMinute.toString().padStart(2, '0')} nhưng chấm lúc ${timeStr}. Tiết học này bị đánh dấu cần duyệt.`;
 
     const sessionSchedules = todaySchedules
-      .filter(s => getSessionShort(s.session) === getSessionShort(selectedSchedule.session) && s.schoolId === selectedSchedule.schoolId)
+      .filter(s => getSessionShort(s.session) === getSessionShort(selectedSchedule.session) && (s.schoolId === selectedSchedule.schoolId || (getSchoolName(s.schoolId, s).trim().toLowerCase() === getSchoolName(selectedSchedule.schoolId, selectedSchedule).trim().toLowerCase())))
       .filter(s => {
         const cName = getClassName(s.classId).toLowerCase();
         const sName = getSchoolName(s.schoolId, s).toLowerCase();
         if (cName.includes('chuyên môn') || sName.includes('chuyên môn') || cName.includes('họp') || sName.includes('họp')) return false;
         return true;
       });
-    const uncheckedSchedules = sessionSchedules.filter(s => 
-      !attendance.some(a => a.teacherId === currentTeacher.id && a.date === todayStr && a.scheduleId === s.id)
+
+    // Exclude schedules that already have a selfie photo, but allow manual checkins to be upgraded with photo!
+    const availableSchedules = sessionSchedules.filter(s => {
+      const existing = attendance.find(a => !(a as any).isDeleted && a.teacherId === currentTeacher.id && a.date === todayStr && (a.scheduleId === s.id || (a.schoolId === s.schoolId && a.classId === s.classId)));
+      const hasPhoto = existing && (existing.hasSelfie || (existing.selfieImage && existing.selfieImage.length > 50));
+      const isCancelled = schoolCancellations.some(c => 
+        c.teacherId === currentTeacher.id && 
+        c.date === todayStr && 
+        (c.scheduleId === s.id || (c.schoolId === s.schoolId && c.classId === s.classId))
+      );
+      return !hasPhoto && !isCancelled;
+    });
+
+    const uncheckedSchedules = availableSchedules.filter(s => 
+      selectedCheckinScheduleIds.length > 0 ? selectedCheckinScheduleIds.includes(s.id) : s.id === selectedSchedule.id
     );
 
     if (uncheckedSchedules.length === 0) {
-      customAlert('Thông báo', "Bạn đã chấm công tất cả các lớp trong ca này rồi!");
+      customAlert('Thông báo', "Vui lòng chọn ít nhất 1 lớp muốn điểm danh (hoặc các lớp đã được điểm danh / báo nghỉ hết rồi)!");
       setIsCameraActive(false);
       return;
     }
 
-    
     const targetFlagged = isCheatFlagged || isLateFlagged;
     const targetReason = isCheatFlagged ? cheatReason : lateReason;
+
+    // Filter out existing manual records that will be replaced/upgraded with this new photo check-in
+    const existingFilteredAttendance = attendance.filter(a => {
+      if (a.teacherId !== currentTeacher.id || a.date !== todayStr) return true;
+      const isReplacing = uncheckedSchedules.some(s => s.id === a.scheduleId || (s.schoolId === a.schoolId && s.classId === a.classId));
+      return !isReplacing;
+    });
 
     const newLogs: AttendanceLog[] = uncheckedSchedules.map((sched, idx) => {
        return {
@@ -750,7 +995,8 @@ export default function TeacherDashboard({
          lat: userLat,
          lng: userLng,
          distanceMeter: distance,
-         selfieImage: capturedImage,
+         selfieImage: finalSelfieImage,
+         hasSelfie: true,
          verificationMethod: scannedQR ? 'BOTH' : 'GPS',
          isVerified: !targetFlagged,
          isFlagged: targetFlagged,
@@ -759,7 +1005,7 @@ export default function TeacherDashboard({
        };
     });
 
-    onUpdateAttendance([...attendance, ...newLogs]);
+    onUpdateAttendance([...existingFilteredAttendance, ...newLogs]);
 
     if (isCheatFlagged) {
       onAddAuditLog(
@@ -832,18 +1078,30 @@ export default function TeacherDashboard({
       const [y, m, d] = c.date.split('-');
       const reqDateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
       const reqDayOfWeek = reqDateObj.getDay() === 0 ? 8 : reqDateObj.getDay() + 1;
-      const origSched = schedules.find(s => s.teacherId === currentTeacher.id && s.dayOfWeek === reqDayOfWeek && getSessionCategory(s.session) === c.session && !s.isDeleted);
-      const schoolName = origSched ? getSchoolName(origSched.schoolId, origSched) : '';
-      const classNameStr = origSched ? getClassName(origSched.classId) : '';
+      const matchingScheds = schedules.filter(s => s.teacherId === currentTeacher.id && s.dayOfWeek === reqDayOfWeek && getSessionCategory(s.session) === c.session && !s.isDeleted);
       
-      missed.push({
-        id: `leave_${c.id}`,
-        date: c.date,
-        session: c.session,
-        label: `${d}/${m}/${y} (${c.session === 'morning' ? 'Sáng' : 'Chiều'}) - ${schoolName || 'Lịch dạy'} (Nghỉ phép có đơn)`,
-        reason: c.reason,
-        schedule: origSched
-      });
+      if (matchingScheds.length > 0) {
+        matchingScheds.forEach(s => {
+          const schoolName = getSchoolName(s.schoolId, s);
+          const classNameStr = getClassName(s.classId);
+          missed.push({
+            id: `leave_${c.id}_${s.id}`,
+            date: c.date,
+            session: c.session,
+            label: `${d}/${m}/${y} (${c.session === 'morning' ? 'Sáng' : 'Chiều'}) - ${schoolName} - Lớp ${classNameStr} (Nghỉ phép có đơn)`,
+            reason: c.reason,
+            schedule: s
+          });
+        });
+      } else {
+        missed.push({
+          id: `leave_${c.id}`,
+          date: c.date,
+          session: c.session,
+          label: `${d}/${m}/${y} (${c.session === 'morning' ? 'Sáng' : 'Chiều'}) - Nghỉ phép cả buổi`,
+          reason: c.reason
+        });
+      }
     });
 
     // 2. Scan past 30 days for weekly schedules that have no attendance logs
@@ -892,8 +1150,29 @@ export default function TeacherDashboard({
       return;
     }
 
-    const newReqId = `REQ00${changes.length + 1}`;
-    const finalReason = reqType === 'art_performance' ? `[Số lượng: ${artCount}] - ${reqReason}` : reqReason;
+    const newReqId = `REQ_${Date.now()}_${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+    let targetTeacherIdVal: string | undefined = undefined;
+    let finalReason = reqReason;
+
+    if (reqType === 'art_performance') {
+      finalReason = `[Số lượng: ${artCount}] - ${reqReason}`;
+    } else if (reqType === 'substitute_teacher') {
+      if (substituteMode === 'past_leave') {
+        targetTeacherIdVal = currentTeacher.id;
+        finalReason = `[Tự dạy bù - Giữ chuyên cần] ${reqReason}`;
+      } else {
+        targetTeacherIdVal = substituteTargetTeacherId || undefined;
+      }
+    } else if (reqType === 'emergency_swap' || reqType === 'swap_shift') {
+      if (emergencySubMode === 'no_substitute') {
+        targetTeacherIdVal = 'no_substitute';
+        finalReason = `[Đổi ca khẩn cấp - Không có GV thay ca gốc (Giữ chuyên cần)] ${reqReason}`;
+      } else {
+        targetTeacherIdVal = emergencyTargetTeacherId || undefined;
+        finalReason = `[Đổi ca khẩn cấp - Có GV thay ca gốc] ${reqReason}`;
+      }
+    }
+
     const newRequest: ChangeRequest = {
       id: newReqId,
       teacherId: currentTeacher.id,
@@ -901,25 +1180,33 @@ export default function TeacherDashboard({
       date: reqDate,
       session: reqSession,
       originalTeacherId: currentTeacher.id,
-      targetTeacherId: undefined, // Admin will assign this later
+      targetTeacherId: targetTeacherIdVal,
+      targetScheduleId: (reqType === 'substitute_teacher' && substituteMode === 'past_leave') ? selectedPastLeaveIds.join(',') : undefined,
       reason: finalReason,
       status: 'pending',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      proofImage: proofImagePreview || ''
     };
 
+    const typeText = reqType === 'sick_leave' ? 'nghỉ ốm' : 
+                     (reqType === 'emergency_swap' || reqType === 'swap_shift') ? 'đổi ca khẩn cấp' : 
+                     reqType === 'substitute_teacher' ? 'nhờ người dạy thay' : 'coi văn nghệ';
+
     onUpdateChanges([...changes, newRequest]);
-    onAddAuditLog('Xin nghỉ/đổi ca/dạy thay', currentTeacher.name, `Gửi yêu cầu ${reqType === 'sick_leave' ? 'nghỉ ốm' : reqType === 'substitute_teacher' ? 'nhờ người dạy thay' : 'đổi ca'} ngày ${reqDate}.`);
+    onAddAuditLog('Xin nghỉ/đổi ca/dạy thay', currentTeacher.name, `Gửi yêu cầu ${typeText} ngày ${reqDate}.`);
     
     onAddNotification(
       'Yêu cầu duyệt phép mới 📣',
-      `${currentTeacher.name} gửi đơn yêu cầu ${reqType === 'sick_leave' ? 'xin nghỉ' : reqType === 'substitute_teacher' ? 'nhờ dạy thay' : 'đổi ca'} ngày ${reqDate}. Đợi Admin duyệt và xếp giáo viên thế.`,
+      `${currentTeacher.name} gửi đơn yêu cầu ${typeText} ngày ${reqDate}. Đợi Admin duyệt và xếp giáo viên thế.`,
       'info'
     );
 
-    setReqStatusMessage('Gửi đơn xin đổi ca thành công! Vui lòng chờ Giám đốc duyệt chốt.');
+    setReqStatusMessage('Gửi đơn xin thành công! Vui lòng chờ Giám đốc duyệt chốt.');
     setReqReason('');
+    setProofImagePreview('');
     setSubstituteMode('regular');
     setSelectedPastLeaveIds([]);
+    setEmergencyTargetTeacherId('');
     
     setTimeout(() => {
       setReqStatusMessage('');
@@ -977,45 +1264,64 @@ export default function TeacherDashboard({
   const thisMonthLogs = currentTeacher ? attendance.filter(a => !(a as any).isDeleted && a.teacherId === currentTeacher.id && a.date.startsWith(reportMonth) && (a.confirmedByAdmin || a.isVerified || !a.isFlagged)) : [];
   
   // Find substitute logs
-  const approvedSubRequests = currentTeacher ? changes.filter(c => c.status === 'approved' && c.targetTeacherId === currentTeacher.id && c.date.startsWith(reportMonth)) : [];
-    const substituteLogs = thisMonthLogs.filter(log => {
-    const sched = schedules.find(s => !s.isDeleted && s.id === log.scheduleId);
-    return sched && sched.teacherId !== currentTeacher?.id;
-  });
-  const regularLogs = thisMonthLogs.filter(log => {
-    const sched = schedules.find(s => !s.isDeleted && s.id === log.scheduleId);
-    return !sched || sched.teacherId === currentTeacher?.id;
+  const groups: Record<string, AttendanceLog[]> = {};
+  thisMonthLogs.forEach(l => {
+    if (!l || !l.date) return;
+    const key = l.date + '_' + getSessionCategory(l.session);
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(l);
   });
 
-  // Áp dụng Phụ cấp xăng xe (500k) và Phụ cấp chuyên cần (300k - mất nếu đã nghỉ/xin phép)
+  let regularPeriods = 0;
+  let substitutePeriods = 0;
 
-  const adjustPeriods = (logs: AttendanceLog[]) => {
-    const groups: Record<string, AttendanceLog[]> = {};
-    logs.forEach(l => {
-      const key = l.date + '_' + getSessionCategory(l.session);
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(l);
+  Object.values(groups).forEach(group => {
+    let regSum = 0;
+    let subSum = 0;
+    group.forEach(l => {
+      const sched = schedules.find(s => s && s.id === l.scheduleId)
+        || schedules.find(s => s && !s.isDeleted && s.teacherId === currentTeacher?.id && l.schoolId && l.classId && s.schoolId === l.schoolId && s.classId === l.classId)
+        || schedules.find(s => s && !s.isDeleted && l.schoolId && l.classId && s.schoolId === l.schoolId && s.classId === l.classId);
+      const p = (sched && sched.periods !== undefined && sched.periods !== null) ? Number(sched.periods) : (Number(l?.periods) || 1);
+      const isSub = sched && sched.teacherId && sched.teacherId !== currentTeacher?.id;
+      if (isSub) subSum += p;
+      else regSum += p;
     });
-    let total = 0;
-    Object.values(groups).forEach(group => {
-      let sum = group.reduce((acc, curr) => acc + curr.periods, 0);
-      if (sum === 1) sum = 2;
-      else if (sum === 2) sum = 2.5;
-      total += sum;
-    });
-    return total;
-  };
 
-  const regularPeriods = adjustPeriods(regularLogs);
-  const substitutePeriods = adjustPeriods(substituteLogs);
+    const sessionTotal = regSum + subSum;
+    if (sessionTotal === 0) return;
+
+    if (sessionTotal === 1) {
+      if (subSum > 0) substitutePeriods += 2;
+      else regularPeriods += 2;
+    } else if (sessionTotal === 2) {
+      if (subSum === 2) substitutePeriods += 2.5;
+      else if (regSum === 2) regularPeriods += 2.5;
+      else {
+        substitutePeriods += subSum;
+        regularPeriods += (regSum + 0.5);
+      }
+    } else {
+      regularPeriods += regSum;
+      substitutePeriods += subSum;
+    }
+  });
   
   let bonusPeriodsDict: Record<string, number> = {};
   try { if (currentTeacher?.bonusPeriodsJSON) bonusPeriodsDict = JSON.parse(currentTeacher.bonusPeriodsJSON); } catch(e) {}
   const currentBonusPeriods = bonusPeriodsDict[reportMonth] || 0;
 
-  const schoolClosedArrivedPeriods = currentTeacher 
-    ? schoolCancellations.filter(c => c.teacherId === currentTeacher.id && c.date.startsWith(reportMonth) && c.cancellationType === 'arrived').length 
-    : 0;
+  // Hỗ trợ trường nghỉ (Tới nơi mới báo): chuẩn hóa theo ca dạy (mỗi ca tối đa +1 tiết)
+  const arrivedSessionSet = new Set<string>();
+  if (currentTeacher) {
+    (schoolCancellations || []).forEach(c => {
+      if (c && c.teacherId === currentTeacher.id && c.date && typeof c.date === 'string' && c.date.startsWith(reportMonth) && c.cancellationType === 'arrived') {
+        const sessCat = getSessionCategory(c.session);
+        arrivedSessionSet.add(`${c.date}_${c.schoolId}_${sessCat}`);
+      }
+    });
+  }
+  const schoolClosedArrivedPeriods = arrivedSessionSet.size;
 
   const totalVerifiedSchedules = regularPeriods + substitutePeriods + currentBonusPeriods + schoolClosedArrivedPeriods;
   
@@ -1027,8 +1333,50 @@ export default function TeacherDashboard({
   // Helper to allow referencing avoiding TS errors
   function getSubstituteWages(periods: number, rate: number) { return periods * rate; }
   
-  // Áp dụng Phụ cấp xăng xe (500k) và Phụ cấp chuyên cần (300k - mất nếu đã nghỉ/xin phép)
-  const hasApprovedLeave = currentTeacher ? changes.some(c => c.teacherId === currentTeacher.id && c.status === 'approved' && c.date.startsWith(reportMonth) && (c.requestType === 'sick_leave' || c.requestType === 'substitute_teacher')) : false;
+  let attendanceOverrideDict: Record<string, 'granted' | 'revoked'> = {};
+  try {
+    if (currentTeacher?.attendanceBonusOverrideJSON) {
+      attendanceOverrideDict = JSON.parse(currentTeacher.attendanceBonusOverrideJSON);
+    }
+  } catch(e) {}
+  const overrideStatus = attendanceOverrideDict[reportMonth];
+
+  // Áp dụng Phụ cấp xăng xe (500k) và Phụ cấp chuyên cần (300k - mất nếu nghỉ ốm hoặc nhờ người dạy thay)
+  const hasApprovedLeave = currentTeacher ? changes.some(c => {
+    if (!c || c.teacherId !== currentTeacher.id || c.status !== 'approved' || !c.date || typeof c.date !== 'string' || !c.date.startsWith(reportMonth)) return false;
+    if (c.requestType === 'art_performance') return false;
+
+    const reasonLower = (c.reason || '').toLowerCase();
+    const adminNotesLower = (c.adminNotes || '').toLowerCase();
+
+    // 1. Trường báo nghỉ -> Giữ chuyên cần (bỏ qua, không phạt)
+    const isSchoolCancelled = 
+      c.requestType === 'school_closed' ||
+      reasonLower.includes('trường báo nghỉ') || 
+      reasonLower.includes('trường nghỉ') || 
+      reasonLower.includes('nhà trường nghỉ') || 
+      reasonLower.includes('nhà trường cho nghỉ') || 
+      reasonLower.includes('trường đóng cửa') || 
+      reasonLower.includes('trường hoãn') || 
+      reasonLower.includes('nghỉ lễ') || 
+      reasonLower.includes('lễ khai giảng') || 
+      reasonLower.includes('bù nghỉ lễ') ||
+      adminNotesLower.includes('trường báo nghỉ') ||
+      adminNotesLower.includes('trường nghỉ');
+    if (isSchoolCancelled) return false;
+
+    // 2. Có đơn xin tự dạy bù cho đủ tiết -> Giữ chuyên cần (bỏ qua, không phạt)
+    const isSelfMakeup = 
+      c.targetTeacherId === currentTeacher.id ||
+      adminNotesLower.includes('tự dạy bù') ||
+      adminNotesLower.includes('giữ chuyên cần') ||
+      ((reasonLower.includes('tự dạy bù') || reasonLower.includes('dạy bù') || reasonLower.includes('giữ chuyên cần')) && 
+       (!c.targetTeacherId || c.targetTeacherId === currentTeacher.id || c.targetTeacherId === 'no_substitute'));
+    if (isSelfMakeup) return false;
+
+    // Tất cả các trường hợp nghỉ khác (nghỉ ốm, việc riêng, nhờ người dạy thay...) ĐỀU CẮT CHUYÊN CẦN
+    return true;
+  }) : false;
   const artEvents = currentTeacher ? changes.filter(c => c.teacherId === currentTeacher.id && c.status === 'approved' && c.date.startsWith(reportMonth) && c.requestType === 'art_performance') : [];
   let artPerformanceBonus = 0;
   artEvents.forEach(c => {
@@ -1039,16 +1387,208 @@ export default function TeacherDashboard({
 
   const currentAllowance = currentTeacher ? (currentTeacher.monthlyAllowance || 500000) : 0;
   const potentialBonus = currentTeacher ? (currentTeacher.bonus || 300000) : 0;
-  const currentBonus = currentTeacher ? (hasApprovedLeave ? 0 : potentialBonus) + artPerformanceBonus : 0;
+
+  let isAttendanceBonusGranted = !hasApprovedLeave;
+  if (overrideStatus === 'granted') isAttendanceBonusGranted = true;
+  else if (overrideStatus === 'revoked') isAttendanceBonusGranted = false;
+
+  const currentBonus = currentTeacher ? (isAttendanceBonusGranted ? potentialBonus : 0) + artPerformanceBonus : 0;
 
   const netEarnings = currentTeacher ? totalWagesEarned + currentAllowance + currentBonus - currentTeacher.deduction : 0;
 
+  // DYNAMIC CALENDAR-BASED KPI CALCULATION (Thời khóa biểu chuẩn × Số ngày trong tháng)
+  const reportYear = reportDate.getFullYear();
+  const reportMonthIndex = reportDate.getMonth();
+  const daysInCurrentMonth = new Date(reportYear, reportMonthIndex + 1, 0).getDate();
+  const todayDayNumber = reportDate.getDate();
+
+  // Active regular schedules for this teacher
+  const teacherActiveSchedules = currentTeacher 
+    ? schedules.filter(s => !s.isDeleted && s.teacherId === currentTeacher.id) 
+    : [];
+
+  // Group schedules by dayOfWeek to find standard periods per dayOfWeek
+  const dayOfWeekScheduleSummary: Record<number, { dayLabel: string; count: number; periodsPerDay: number; totalPeriods: number }> = {
+    2: { dayLabel: 'Thứ 2', count: 0, periodsPerDay: 0, totalPeriods: 0 },
+    3: { dayLabel: 'Thứ 3', count: 0, periodsPerDay: 0, totalPeriods: 0 },
+    4: { dayLabel: 'Thứ 4', count: 0, periodsPerDay: 0, totalPeriods: 0 },
+    5: { dayLabel: 'Thứ 5', count: 0, periodsPerDay: 0, totalPeriods: 0 },
+    6: { dayLabel: 'Thứ 6', count: 0, periodsPerDay: 0, totalPeriods: 0 },
+    7: { dayLabel: 'Thứ 7', count: 0, periodsPerDay: 0, totalPeriods: 0 },
+    8: { dayLabel: 'Chủ Nhật', count: 0, periodsPerDay: 0, totalPeriods: 0 },
+  };
+
+  for (let dow = 2; dow <= 8; dow++) {
+    const daySchedules = teacherActiveSchedules.filter(s => s.dayOfWeek === dow);
+    const sessionGroups: Record<string, Schedule[]> = {};
+    daySchedules.forEach(s => {
+      const sessCat = getSessionCategory(s.session);
+      if (!sessionGroups[sessCat]) sessionGroups[sessCat] = [];
+      sessionGroups[sessCat].push(s);
+    });
+
+    let dayPeriods = 0;
+    Object.values(sessionGroups).forEach(group => {
+      let sessSum = group.reduce((acc, curr) => {
+        return acc + ((curr.periods !== undefined && curr.periods !== null) ? Number(curr.periods) : 1);
+      }, 0);
+      if (sessSum === 1) sessSum = 2;
+      else if (sessSum === 2) sessSum = 2.5;
+      dayPeriods += sessSum;
+    });
+    dayOfWeekScheduleSummary[dow].periodsPerDay = dayPeriods;
+  }
+
+  // Iterate every day in the month (e.g. 28, 29, 30, 31 days)
+  let monthlyScheduleTotalPeriods = 0;
+  let scheduledUpToTodayPeriods = 0;
+  const weeklyScheduledTarget: number[] = [0, 0, 0, 0, 0];
+
+  for (let day = 1; day <= daysInCurrentMonth; day++) {
+    const dObj = new Date(reportYear, reportMonthIndex, day);
+    const dOfWeek = dObj.getDay() === 0 ? 8 : dObj.getDay() + 1; // 2=T2, ..., 8=CN
+    dayOfWeekScheduleSummary[dOfWeek].count += 1;
+
+    const dayP = dayOfWeekScheduleSummary[dOfWeek].periodsPerDay;
+    monthlyScheduleTotalPeriods += dayP;
+    if (day <= todayDayNumber) {
+      scheduledUpToTodayPeriods += dayP;
+    }
+
+    if (day <= 7) weeklyScheduledTarget[0] += dayP;
+    else if (day <= 14) weeklyScheduledTarget[1] += dayP;
+    else if (day <= 21) weeklyScheduledTarget[2] += dayP;
+    else if (day <= 28) weeklyScheduledTarget[3] += dayP;
+    else weeklyScheduledTarget[4] += dayP;
+  }
+
+  // Multiply count by periodsPerDay for summary
+  for (let dow = 2; dow <= 8; dow++) {
+    dayOfWeekScheduleSummary[dow].totalPeriods = dayOfWeekScheduleSummary[dow].count * dayOfWeekScheduleSummary[dow].periodsPerDay;
+  }
+
+  const kpiMonthlyTarget = monthlyScheduleTotalPeriods;
+  const kpiProgressPct = kpiMonthlyTarget > 0 ? Math.min(200, Math.round((totalVerifiedSchedules / kpiMonthlyTarget) * 100)) : 0;
+  const kpiRemainingPeriods = Math.max(0, kpiMonthlyTarget - totalVerifiedSchedules);
+
+  // Group verified attendance by week in the current month
+  const weeklyDistribution: { weekLabel: string; periods: number }[] = [
+    { weekLabel: 'Tuần 1 (1-7)', periods: 0 },
+    { weekLabel: 'Tuần 2 (8-14)', periods: 0 },
+    { weekLabel: 'Tuần 3 (15-21)', periods: 0 },
+    { weekLabel: 'Tuần 4 (22-28)', periods: 0 },
+    { weekLabel: 'Tuần 5 (29+)', periods: 0 },
+  ];
+
+  thisMonthLogs.forEach(log => {
+    const day = parseInt(log.date.split('-')[2], 10);
+    const p = Number(log.periods) || 1;
+    if (day <= 7) weeklyDistribution[0].periods += p;
+    else if (day <= 14) weeklyDistribution[1].periods += p;
+    else if (day <= 21) weeklyDistribution[2].periods += p;
+    else if (day <= 28) weeklyDistribution[3].periods += p;
+    else weeklyDistribution[4].periods += p;
+  });
+
+  // Group by school
+  const schoolDistributionMap = new Map<string, number>();
+  thisMonthLogs.forEach(log => {
+    const sName = getSchoolName(log.schoolId, log);
+    const p = Number(log.periods) || 1;
+    schoolDistributionMap.set(sName, (schoolDistributionMap.get(sName) || 0) + p);
+  });
+  const schoolDistribution = Array.from(schoolDistributionMap.entries()).map(([name, periods]) => ({ name, periods }));
+
+  // Helper: Client-side compression for proof image
+  const compressImageFile = (file: File): Promise<string> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const maxDim = 800;
+          let w = img.width;
+          let h = img.height;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve((e.target?.result as string) || '');
+            return;
+          }
+          ctx.drawImage(img, 0, 0, w, h);
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.65);
+          resolve(compressedBase64);
+        };
+        img.onerror = () => resolve((e.target?.result as string) || '');
+        img.src = (e.target?.result as string) || '';
+      };
+      reader.onerror = () => resolve('');
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleProofImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setIsCompressingProof(true);
+      try {
+        const compressed = await compressImageFile(file);
+        setProofImagePreview(compressed);
+      } catch (err) {
+        console.error('Error compressing image:', err);
+      } finally {
+        setIsCompressingProof(false);
+      }
+    }
+  };
+
   if (!currentTeacher) {
     return (
-      <div className="w-full h-full flex flex-col items-center justify-center bg-slate-50 text-slate-500">
-        <Smartphone className="w-12 h-12 mb-4 text-slate-300" />
-        <h3 className="text-lg font-bold text-slate-700">Không có quyền truy cập</h3>
-        <p className="text-sm mt-2 max-w-xs text-center">Tài khoản của bạn không được cấp quyền xem hoặc chưa được gắn dữ liệu giáo viên.</p>
+      <div className="w-full min-h-screen flex flex-col items-center justify-center bg-slate-50 text-slate-600 p-6 text-center select-none font-sans">
+        <div className="w-16 h-16 rounded-3xl bg-blue-50 text-blue-600 flex items-center justify-center mb-4 shadow-sm border border-blue-100 animate-pulse">
+          <RefreshCw className="w-8 h-8 animate-spin text-blue-600" />
+        </div>
+        <h3 className="text-base font-bold text-slate-800">Đang đồng bộ hồ sơ giáo viên...</h3>
+        <p className="text-xs text-slate-500 mt-1 max-w-xs leading-relaxed">
+          {teachers.length === 0 
+            ? 'Hệ thống đang tải dữ liệu danh sách giáo viên từ máy chủ, vui lòng đợi trong giây lát...' 
+            : `Đang kết nối tài khoản (${currentUser?.username || 'Chưa rõ'}) với hồ sơ giáo viên Cầu Vồng.`}
+        </p>
+
+        <div className="flex flex-col gap-2.5 mt-6 w-full max-w-xs">
+          <button
+            onClick={() => {
+              try { localStorage.removeItem('etms_is_wiped'); } catch {}
+              window.location.reload();
+            }}
+            className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-sm transition active:scale-95 flex items-center justify-center gap-2"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Tải lại dữ liệu ngay</span>
+          </button>
+
+          <button
+            onClick={() => {
+              try { localStorage.removeItem('etms_current_user'); } catch {}
+              window.location.href = '/';
+            }}
+            className="w-full py-2.5 bg-white hover:bg-rose-50 border border-slate-200 text-rose-600 rounded-xl text-xs font-bold transition active:scale-95 flex items-center justify-center gap-2"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Đăng xuất tài khoản</span>
+          </button>
+        </div>
       </div>
     );
   }
@@ -1129,6 +1669,13 @@ export default function TeacherDashboard({
             {mobileTab === 'home' && (
               <div className="space-y-4 animate-fadeIn">
                 
+                {/* Banner & Modal Khảo Sát Bình Chọn Tiệc 20/11 (Đặt Phòng VIP) */}
+                <TeacherDayPollModal 
+                  teacherId={currentTeacher?.id || currentUser?.teacherId}
+                  teacherName={currentTeacher?.name || currentUser?.username}
+                  isSelf={true}
+                />
+
                 {changes.filter(c => c.teacherId === currentTeacher.id && c.status === 'rejected').length > 0 && (
                   <div className="bg-rose-50 border border-rose-200 p-3 rounded-2xl flex gap-3 items-start animate-pulse">
                     <ShieldAlert className="h-5 w-5 text-rose-500 shrink-0" />
@@ -1218,17 +1765,219 @@ export default function TeacherDashboard({
                       </div>
                     </div>
 
+                    {/* TEACHER KPI & MONTHLY TEACHING PROGRESS CARD */}
+                    <div className="bg-white p-4 rounded-3xl border border-slate-200/80 shadow-sm space-y-3.5 relative overflow-hidden">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-xl">
+                            <Target className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h4 className="text-xs font-extrabold text-slate-800 tracking-tight">TIẾN ĐỘ KPI GIẢNG DẠY</h4>
+                            <span className="text-[10px] text-slate-400 font-mono">Tháng {reportMonthDisplay} ({daysInCurrentMonth} ngày)</span>
+                          </div>
+                        </div>
+
+                        {/* Automatic Dynamic KPI Badge */}
+                        <div className="text-right">
+                          <span className="text-[9px] text-slate-400 uppercase font-mono block">Chỉ tiêu theo TKB</span>
+                          <span className="font-mono font-extrabold text-xs text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-lg border border-indigo-100">
+                            {kpiMonthlyTarget} tiết
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Main Progress Bar & Counter */}
+                      <div className="space-y-1.5 bg-slate-50/80 p-3 rounded-2xl border border-slate-100">
+                        <div className="flex items-baseline justify-between">
+                          <div className="flex items-baseline gap-1.5">
+                            <span className="text-2xl font-extrabold font-mono text-slate-900">{totalVerifiedSchedules}</span>
+                            <span className="text-xs font-semibold text-slate-400">/ {kpiMonthlyTarget} tiết kế hoạch</span>
+                          </div>
+                          <span className={`text-xs font-extrabold font-mono px-2 py-0.5 rounded-full ${
+                            kpiProgressPct >= 100 
+                              ? 'bg-emerald-100 text-emerald-800' 
+                              : kpiProgressPct >= 60 
+                              ? 'bg-blue-100 text-blue-800' 
+                              : 'bg-amber-100 text-amber-800'
+                          }`}>
+                            {kpiProgressPct}%
+                          </span>
+                        </div>
+
+                        {/* Animated Visual Bar */}
+                        <div className="w-full h-3 bg-slate-200/70 rounded-full overflow-hidden p-0.5">
+                          <div 
+                            className={`h-full rounded-full transition-all duration-700 ${
+                              kpiProgressPct >= 100 
+                                ? 'bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-400' 
+                                : kpiProgressPct >= 60 
+                                ? 'bg-gradient-to-r from-blue-600 to-indigo-500' 
+                                : 'bg-gradient-to-r from-amber-500 to-orange-400'
+                            }`}
+                            style={{ width: `${Math.min(100, kpiProgressPct)}%` }}
+                          />
+                        </div>
+
+                        {/* Progress Status & Comparison to Day-of-Month Schedule */}
+                        <div className="flex flex-col sm:flex-row justify-between sm:items-center text-[10px] text-slate-500 pt-0.5 gap-0.5">
+                          <span>
+                            {kpiProgressPct >= 100 ? (
+                              <span className="text-emerald-600 font-bold flex items-center gap-1">
+                                <Sparkles className="w-3 h-3 text-amber-500" /> Xuất sắc! Vượt toàn bộ chỉ tiêu TKB tháng (+{totalVerifiedSchedules - kpiMonthlyTarget} tiết)
+                              </span>
+                            ) : (
+                              <span>
+                                Đến ngày {todayDayNumber}/{reportMonthDisplay}: Kế hoạch <b>{scheduledUpToTodayPeriods}t</b>
+                                {totalVerifiedSchedules >= scheduledUpToTodayPeriods ? (
+                                  <span className="text-emerald-600 font-bold ml-1">✓ Đạt tiến độ</span>
+                                ) : (
+                                  <span className="text-amber-600 font-bold ml-1">(Chậm {scheduledUpToTodayPeriods - totalVerifiedSchedules}t)</span>
+                                )}
+                              </span>
+                            )}
+                          </span>
+                          <span className="font-mono text-slate-400">Dự kiến thù lao: {netEarnings.toLocaleString('vi-VN')} đ</span>
+                        </div>
+                      </div>
+
+                      {/* 3 Mini KPI Badges */}
+                      <div className="grid grid-cols-3 gap-2 text-center text-[10px]">
+                        <div className={`p-2 rounded-2xl border flex flex-col items-center justify-center gap-0.5 ${
+                          !hasApprovedLeave ? 'bg-emerald-50/70 border-emerald-100 text-emerald-800' : 'bg-rose-50/70 border-rose-100 text-rose-700'
+                        }`}>
+                          <Award className="w-3.5 h-3.5" />
+                          <span className="font-bold">{!hasApprovedLeave ? '100% Chuyên Cần' : 'Mất Chuyên Cần'}</span>
+                          <span className="text-[8px] opacity-75">{!hasApprovedLeave ? '+300.000 đ' : 'Có đơn nghỉ'}</span>
+                        </div>
+
+                        <div className="p-2 rounded-2xl bg-blue-50/70 border border-blue-100 text-blue-800 flex flex-col items-center justify-center gap-0.5">
+                          <TrendingUp className="w-3.5 h-3.5" />
+                          <span className="font-bold">{substitutePeriods > 0 ? `+${substitutePeriods}t Dạy Thay` : '0t Dạy Thay'}</span>
+                          <span className="text-[8px] opacity-75">{substitutePeriods > 0 ? `+${substituteWagesEarned.toLocaleString('vi-VN')} đ` : 'Hỗ trợ lớp'}</span>
+                        </div>
+
+                        <div className="p-2 rounded-2xl bg-purple-50/70 border border-purple-100 text-purple-800 flex flex-col items-center justify-center gap-0.5">
+                          <Building className="w-3.5 h-3.5" />
+                          <span className="font-bold">{schoolDistribution.length} Điểm Trường</span>
+                          <span className="text-[8px] opacity-75">{regularPeriods}t chính ngạch</span>
+                        </div>
+                      </div>
+
+                      {/* Expandable Mini Charts & TKB Calculation Breakdown */}
+                      <div className="pt-1">
+                        <button
+                          onClick={() => setShowKpiDetails(!showKpiDetails)}
+                          className="w-full py-1.5 px-3 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-xl text-[11px] font-semibold flex items-center justify-between transition cursor-pointer"
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <BarChart3 className="w-3.5 h-3.5 text-indigo-600" /> 
+                            {showKpiDetails ? 'Thu gọn chi tiết tính KPI' : 'Xem chi tiết cách tính KPI theo lịch dạy'}
+                          </span>
+                          {showKpiDetails ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                        </button>
+
+                        {showKpiDetails && (
+                          <div className="mt-3 p-3 bg-slate-50/90 rounded-2xl border border-slate-150 space-y-3.5 animate-fadeIn text-[11px]">
+                            {/* Breakdown of Days × Periods in this specific month */}
+                            <div>
+                              <span className="font-bold text-slate-700 block mb-1.5 text-[10px] uppercase flex items-center justify-between">
+                                <span>🗓️ Lịch phân công theo thứ (Tháng {reportMonthDisplay}):</span>
+                                <span className="font-mono text-indigo-600 font-bold">{daysInCurrentMonth} ngày</span>
+                              </span>
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                                {([2, 3, 4, 5, 6, 7, 8] as const).map(dow => {
+                                  const item = dayOfWeekScheduleSummary[dow];
+                                  if (!item || item.periodsPerDay === 0) return null;
+                                  return (
+                                    <div key={dow} className="bg-white p-2 rounded-xl border border-slate-200 shadow-2xs space-y-0.5">
+                                      <div className="flex justify-between items-center text-[10px]">
+                                        <span className="font-bold text-slate-800">{item.dayLabel}</span>
+                                        <span className="text-[9px] bg-indigo-50 text-indigo-700 font-bold px-1.5 py-0.2 rounded font-mono">{item.count} ngày</span>
+                                      </div>
+                                      <div className="text-[10px] text-slate-500 font-mono">
+                                        {item.periodsPerDay}t/buổi × {item.count} = <b className="text-slate-800 font-bold">{item.totalPeriods}t</b>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            {/* Weekly Distribution Chart with comparison */}
+                            <div className="pt-2 border-t border-slate-200/60">
+                              <span className="font-bold text-slate-700 block mb-1.5 text-[10px] uppercase">
+                                📊 Tiến độ thực tế so với kế hoạch từng tuần:
+                              </span>
+                              <div className="grid grid-cols-5 gap-1.5">
+                                {weeklyDistribution.map((w, idx) => (
+                                  <div key={idx} className="bg-white p-2 rounded-xl border border-slate-200/80 text-center shadow-xs flex flex-col justify-between">
+                                    <span className="text-[9px] text-slate-400 font-mono block">T{idx + 1}</span>
+                                    <span className="text-sm font-extrabold font-mono text-indigo-700 my-0.5">{w.periods}t</span>
+                                    <span className="text-[8px] text-slate-400 truncate">Kế hoạch: {weeklyScheduledTarget[idx]}t</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* School Distribution List */}
+                            {schoolDistribution.length > 0 && (
+                              <div className="pt-2 border-t border-slate-200/60">
+                                <span className="font-bold text-slate-700 block mb-1 text-[10px] uppercase">
+                                  🏫 Phân bổ tiết theo điểm trường:
+                                </span>
+                                <div className="space-y-1">
+                                  {schoolDistribution.map((item, idx) => (
+                                    <div key={idx} className="flex justify-between items-center p-1.5 bg-white rounded-lg border border-slate-100">
+                                      <span className="text-slate-700 font-medium truncate max-w-[200px]">{item.name}</span>
+                                      <span className="font-mono font-bold text-blue-700 text-[10px] shrink-0 bg-blue-50 px-1.5 py-0.5 rounded">
+                                        {item.periods} tiết
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
                     {/* TODAY LESSONS FEED HIGHLIGHT */}
                     <div className="space-y-2">
                       <h4 className="text-xs font-extrabold text-neutral-400 tracking-wider font-mono">LỊCH DẠY CỦA BẠN HÔM NAY (THỨ {currentDayOfWeek})</h4>
                       
                       <div className="space-y-2.5">
                         {todaySchedules.map(sc => {
-  const isCheckedIn = attendance.some(a => a.teacherId === currentTeacher.id && a.date === todayStr && a.scheduleId === sc.id);
-  const cancellation = schoolCancellations.find(c => c.teacherId === currentTeacher.id && c.date === todayStr && c.scheduleId === sc.id);
+  const isCheckedIn = attendance.some(a => 
+    !(a as any).isDeleted && 
+    a.teacherId === currentTeacher.id && 
+    a.date === todayStr && 
+    (
+      a.scheduleId === sc.id || 
+      (a.schoolId === sc.schoolId && a.classId === sc.classId) || 
+      (!a.scheduleId && !a.classId && a.schoolId === sc.schoolId && getSessionCategory(a.session) === getSessionCategory(sc.session))
+    )
+  );
+  const cancellation = schoolCancellations.find(c => 
+    c.teacherId === currentTeacher.id && 
+    c.date === todayStr && 
+    (
+      c.scheduleId === sc.id || 
+      (c.schoolId === sc.schoolId && c.classId === sc.classId) || 
+      (!c.scheduleId && !c.classId && c.schoolId === sc.schoolId && getSessionCategory(c.session) === getSessionCategory(sc.session))
+    )
+  );
   const isCanceled = !!cancellation;
   return (
-    <div key={sc.id} className="p-3 bg-neutral-50 hover:bg-neutral-100 rounded-2xl border border-neutral-150 transition flex items-center justify-between gap-3 text-xs shadow-sm">
+    <div 
+      key={sc.id} 
+      className={`p-3 rounded-2xl border transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-sm ${
+        isCanceled 
+          ? 'bg-sky-50/80 border-sky-200 shadow-xs' 
+          : 'bg-neutral-50 hover:bg-neutral-100 border-neutral-150'
+      }`}
+    >
       <div className="space-y-1">
         <div className="flex items-center gap-1.5">
           <span className="font-extrabold text-neutral-800">Thứ {sc.dayOfWeek}</span>
@@ -1237,9 +1986,26 @@ export default function TeacherDashboard({
           }`}>
             {getSessionShort(sc.session).toUpperCase()}
           </span>
+          {isCanceled && (
+            <span className="text-[9px] font-bold text-sky-800 bg-sky-100 px-2 py-0.5 rounded-full">
+              {cancellation.cancellationType === 'arrived' ? '🏫 Tới nơi mới báo (+1t)' : '🏫 Trường báo nghỉ (Rảnh ca)'}
+            </span>
+          )}
         </div>
         <p className="font-bold text-slate-900 text-sm">{getClassName(sc.classId)}</p>
         <p className="text-[11px] text-neutral-500 truncate max-w-44">{getSchoolName(sc.schoolId, sc)}</p>
+        {isCanceled && (
+          <div className="mt-1 p-2 bg-white/80 border border-sky-150 rounded-xl space-y-0.5">
+            {cancellation.reason && (
+              <p className="text-[10px] text-slate-700 font-medium">
+                <span className="font-bold text-slate-500">Lý do:</span> {cancellation.reason}
+              </p>
+            )}
+            <p className="text-[10px] text-emerald-700 font-semibold flex items-center gap-1">
+              <span>✨</span> Lịch ca này đang TRỐNG (RẢNH) - Sẵn sàng nhận điều phối dạy bù/thay.
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="text-right shrink-0">
@@ -1249,27 +2015,49 @@ export default function TeacherDashboard({
             ✓ Đã chấm
           </span>
         ) : isCanceled ? (
-          <span className={`text-[10px] font-bold px-2 py-1 rounded border block ${
-            cancellation.cancellationType === 'arrived' 
-              ? 'text-orange-600 bg-orange-50 border-orange-100' 
-              : 'text-slate-600 bg-slate-50 border-slate-100'
-          }`}>
-            {cancellation.cancellationType === 'arrived' ? 'Trường nghỉ (Tới trường)' : 'Trường nghỉ (Báo trước)'}
-          </span>
+          <div className="flex flex-col gap-1.5 items-end">
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border block ${
+              cancellation.cancellationType === 'arrived' 
+                ? 'text-orange-700 bg-orange-50 border-orange-200' 
+                : 'text-sky-800 bg-sky-50 border-sky-200'
+            }`}>
+              {cancellation.cancellationType === 'arrived' ? '🏫 Trường nghỉ (+1t)' : '🏫 Rảnh Ca (Trường nghỉ)'}
+            </span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleCancelSchoolClosed(cancellation.id, sc);
+              }}
+              className="bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white font-bold py-1 px-2.5 rounded-xl text-[10px] transition cursor-pointer active:scale-95 flex items-center gap-1 shadow-xs"
+              title="Khôi phục ca dạy nếu trường học lại bình thường hoặc bấm nhầm"
+            >
+              <RotateCcw className="w-3 h-3" /> Hủy báo nghỉ (Dạy lại)
+            </button>
+          </div>
         ) : (
           <div className="flex flex-col gap-1 items-end">
             <button 
-              onClick={() => {
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
                 setSelectedScheduleId(sc.id);
                 setMobileTab('checkin');
               }}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-bold p-1 px-3 rounded-full text-[10px] transition w-24 text-center block"
+              className="bg-blue-600 hover:bg-blue-700 text-white font-bold p-1.5 px-3 rounded-xl text-[10px] transition w-24 text-center block cursor-pointer active:scale-95 shadow-xs"
             >
               Điểm Danh
             </button>
             <button 
-              onClick={() => handleOpenSchoolClosedModal(sc)}
-              className="bg-rose-500 hover:bg-rose-600 text-white font-bold p-1 px-3 rounded-full text-[10px] transition w-24 text-center block"
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleOpenSchoolClosedModal(sc);
+              }}
+              className="bg-rose-500 hover:bg-rose-600 text-white font-bold p-1.5 px-3 rounded-xl text-[10px] transition w-24 text-center block cursor-pointer active:scale-95 shadow-xs"
             >
               Trường Nghỉ
             </button>
@@ -1281,11 +2069,32 @@ export default function TeacherDashboard({
 })}
 
                         
-                <div className="flex gap-2">
-                  <button onClick={handleEnableNotifications} className="w-full bg-amber-50 text-amber-700 p-2.5 rounded-2xl border border-amber-100 text-[10px] font-bold shadow-sm flex items-center justify-center gap-1">
-                    <Bell className="w-3 h-3" /> BẬT THÔNG BÁO APP
-                  </button>
-                </div>
+                {isTeacherJoined ? (
+                  <div className="w-full bg-emerald-50 text-emerald-700 p-2.5 rounded-2xl border border-emerald-200 text-[11px] font-bold flex items-center justify-center gap-1.5 text-center">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                    <span>BẠN ĐÃ BẬT CHUÔNG NHẮC LỊCH MESSENGER</span>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    <a 
+                      href="https://m.me/tuyendungmamnonTPHCM?ref=BAT_THONG_BAO" 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      onClick={() => {
+                        if (currentTeacher?.id) {
+                          fetch(`/api/teachers/${currentTeacher.id}/joined-notification`, { method: 'POST' }).catch(() => {});
+                          currentTeacher.notificationToken = 'ACTIVATED_20261026';
+                        }
+                      }}
+                      className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white p-2.5 rounded-2xl text-[11px] font-bold shadow-sm flex items-center justify-center gap-1.5 transition-all text-center animate-pulse"
+                    >
+                      <MessageCircle className="w-3.5 h-3.5 flex-shrink-0" /> BẬT CHUÔNG NHẮC LỊCH MESSENGER (1 CHẠM)
+                    </a>
+                    <button onClick={handleEnableNotifications} className="w-full bg-amber-50 text-amber-700 p-2.5 rounded-2xl border border-amber-100 text-[10px] font-bold shadow-sm flex items-center justify-center gap-1">
+                      <Bell className="w-3 h-3" /> BẬT THÔNG BÁO APP
+                    </button>
+                  </div>
+                )}
 
                         {todaySchedules.length === 0 && (
                           <div className="text-center py-6 text-neutral-450 border border-wrap border-neutral-100 rounded-3xl p-4">
@@ -1351,26 +2160,20 @@ export default function TeacherDashboard({
                              }).map(s => (
                                <option key={s.id} value={s.id}>{getSchoolName(s.schoolId, s)} - Lớp {getClassName(s.classId)}</option>
                              ))}
-                             {changes.filter(c => c.targetTeacherId === currentTeacher?.id && c.status === 'approved').map(c => {
+                             {changes.filter(c => c.targetTeacherId === currentTeacher?.id && c.status === 'approved').flatMap(c => {
                                const [y, m, d] = c.date.split('-');
                                const reqDateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
                                const reqDayOfWeek = reqDateObj.getDay() === 0 ? 8 : reqDateObj.getDay() + 1;
-                               let originalSchedule = schedules.find(s => !s.isDeleted && s.teacherId === c.originalTeacherId && s.dayOfWeek === reqDayOfWeek && getSessionCategory(s.session) === c.session);
-                               if (!originalSchedule) {
-                                  originalSchedule = schedules.find(s => {
-                                    if (s.isDeleted || s.teacherId !== c.originalTeacherId) return false;
-                                    const schoolName = getSchoolName(s.schoolId, s).toLowerCase();
-                                    const reasonLower = (c.reason || '').toLowerCase();
-                                    return reasonLower.includes(schoolName) || schoolName.includes(reasonLower);
-                                  }) || schedules.find(s => !s.isDeleted && s.teacherId === c.originalTeacherId);
+                               let originalScheds = schedules.filter(s => !s.isDeleted && s.teacherId === c.originalTeacherId && s.dayOfWeek === reqDayOfWeek && getSessionCategory(s.session) === c.session);
+                               if (originalScheds.length === 0) {
+                                 originalScheds = schedules.filter(s => !s.isDeleted && s.teacherId === c.originalTeacherId && s.dayOfWeek === reqDayOfWeek);
                                }
-                               if (!originalSchedule) return null;
                                const origTeacherName = teachers.find(t => t.id === c.originalTeacherId)?.name || c.originalTeacherId;
-                               return (
-                                 <option key={`sub_${c.id}`} value={originalSchedule.id}>
+                               return originalScheds.map(originalSchedule => (
+                                 <option key={`sub_${c.id}_${originalSchedule.id}`} value={originalSchedule.id}>
                                    [Dạy Dùm] {getSchoolName(originalSchedule.schoolId, originalSchedule)} - Lớp {getClassName(originalSchedule.classId)} ({c.date} - Thay cho {origTeacherName})
                                  </option>
-                               );
+                               ));
                              })}
                           </select>
                         </div>
@@ -1510,51 +2313,12 @@ export default function TeacherDashboard({
                                   </button>
                                 )}
                               </span>
-                              <div 
-                                className="flex items-center gap-1.5 border border-slate-200 px-1.5 py-0.5 rounded cursor-pointer" 
-                                onClick={() => {
-                                  if (activeAlarms[l.id]) {
-                                    removeAlarm(l.id, timeString);
-                                  } else {
-                                    setEditingAlarm({ id: l.id, timeString });
-                                    setEditingMinutes(30);
-                                  }
-                                }}
-                              >
-                                <Clock className={`w-3 h-3 ${activeAlarms[l.id] ? 'text-blue-600' : 'text-slate-400'}`} />
-                                <span className={`text-[9px] ${activeAlarms[l.id] ? 'text-blue-600 font-bold' : 'text-slate-500'}`}>
-                                  {activeAlarms[l.id] ? `Hẹn trước ${activeAlarms[l.id]}p` : 'Báo Thức'}
-                                </span>
-                              </div>
                             </div>
                             <div className="text-[10px] text-slate-500 flex justify-between">
                               <span>{getSchoolName(l.schoolId, l)}</span>
                               <span className="font-semibold">Ca {getSessionLabel(l.session)}</span>
                             </div>
                             <div className="text-[9px] text-blue-600 font-semibold">{l.periods} tiết dạy tiêu chuẩn</div>
-                            
-                            {/* Inline Alarm Editor */}
-                            {editingAlarm?.id === l.id && (
-                              <div className="absolute right-0 top-8 bg-white border border-slate-200 shadow-xl rounded-xl p-3 z-10 w-48 text-left animate-fadeIn">
-                                <h5 className="text-[10px] font-bold text-slate-700 mb-2">Hẹn giờ báo thức</h5>
-                                <p className="text-[9px] text-slate-500 mb-2">Báo trước khi ca dạy bắt đầu ({timeString}):</p>
-                                <div className="flex gap-1 mb-3 flex-wrap">
-                                  {[15, 30, 45, 60, 90].map(mins => (
-                                    <button 
-                                      key={mins}
-                                      onClick={() => setEditingMinutes(mins)}
-                                      className={`text-[9px] px-2 py-1 rounded-md transition ${editingMinutes === mins ? 'bg-blue-600 text-white font-bold' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                                    >
-                                      {mins}p
-                                    </button>
-                                  ))}
-                                </div>
-                                <div className="flex gap-2">
-                                  <button onClick={() => setEditingAlarm(null)} className="flex-1 text-[9px] py-1.5 rounded-lg bg-slate-100 text-slate-600 font-semibold">Huỷ</button>
-                                  <button onClick={saveAlarm} className="flex-1 text-[9px] py-1.5 rounded-lg bg-emerald-600 text-white font-bold">Lưu</button>
-                                </div>
-                              </div>
-                            )}
                           </div>
                         )})}
                         {lessons.length === 0 && <span className="text-[10px] text-slate-400 italic font-mono block">Nghỉ tự do</span>}
@@ -1569,9 +2333,51 @@ export default function TeacherDashboard({
             {mobileTab === 'checkin' && (
               <div className="space-y-4 animate-fadeIn text-xs">
                 <div className="flex items-center justify-between border-b pb-2">
-                  <h3 className="font-bold text-sm">Chấm Công Trực Tuyến</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-sm">Chấm Công Trực Tuyến</h3>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 ${
+                      isNetworkOnline ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800 animate-pulse'
+                    }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${isNetworkOnline ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+                      {isNetworkOnline ? '4G/WiFi Trực Tuyến' : 'Ngoại Tuyến'}
+                    </span>
+                  </div>
                   <button onClick={() => setMobileTab('home')} className="text-neutral-500 font-bold">Quay Lại</button>
                 </div>
+
+                {/* BANNER THÔNG BÁO CHẾ ĐỘ NGOẠI TUYẾN KHI MẤT SÓNG HOẶC CÓ CA CHỜ GỬI (MỤC 7) */}
+                {(!isNetworkOnline || offlinePendingCount > 0) && (
+                  <div className={`p-3 rounded-xl border flex items-center justify-between text-xs transition-all ${
+                    !isNetworkOnline
+                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-800'
+                      : 'bg-blue-500/10 border-blue-500/30 text-blue-800'
+                  }`}>
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-base">{!isNetworkOnline ? '📶' : '⏳'}</span>
+                      <div>
+                        <div className="font-bold">
+                          {!isNetworkOnline
+                            ? 'Chế độ Chấm công Ngoại Tuyến (Offline)'
+                            : `Có ${offlinePendingCount} ca chấm công đang chờ gửi`}
+                        </div>
+                        <div className="text-[11px] opacity-85">
+                          {!isNetworkOnline
+                            ? 'Mất sóng 4G/WiFi. Ảnh và toạ độ vẫn lưu an toàn trên máy, sẽ tự động gửi khi có mạng!'
+                            : 'Hệ thống đã lưu an toàn trên máy và sẽ tự động đồng bộ lên máy chủ.'}
+                        </div>
+                      </div>
+                    </div>
+                    {offlinePendingCount > 0 && isNetworkOnline && (
+                      <button
+                        type="button"
+                        onClick={() => window.dispatchEvent(new Event('online'))}
+                        className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] whitespace-nowrap shadow-sm"
+                      >
+                        Đồng bộ ngay
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 <form onSubmit={handleCheckInNow} className="space-y-4">
                     
@@ -1594,7 +2400,7 @@ export default function TeacherDashboard({
                           return true;
                         }).map(sc => (
                           <option key={sc.id} value={sc.id}>
-                            {getSessionShort(sc.session)} - Lớp {getClassName(sc.classId)} 
+                            [{getSchoolName(sc.schoolId, sc)}] {getSessionShort(sc.session)} - Lớp {getClassName(sc.classId)} ({sc.periods}t)
                             {(sc as any).isSubstitute && ' (DẠY THẾ)'}
                           </option>
                         ))}
@@ -1604,6 +2410,94 @@ export default function TeacherDashboard({
                     {selectedSchedule && targetSchool && (
                       <div className="space-y-4">
                         
+                        {/* CLASS SELECTION / CHECKLIST FOR SHIFT */}
+                        <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <label className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                              <span>📋</span> Danh sách lớp tại {targetSchool.name}:
+                            </label>
+                            <button 
+                              type="button" 
+                              onClick={() => handleOpenSchoolClosedModal(selectedSchedule)}
+                              className="text-[10px] font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 px-2.5 py-1 rounded-lg border border-rose-200 transition cursor-pointer flex items-center gap-1"
+                              title="Báo ca dạy này trường nghỉ"
+                            >
+                              <span>🏫</span> Báo Trường Nghỉ
+                            </button>
+                          </div>
+                          
+                          <div className="space-y-2">
+                            {todaySchedules
+                              .filter(s => getSessionShort(s.session) === getSessionShort(selectedSchedule.session) && (s.schoolId === selectedSchedule.schoolId || (getSchoolName(s.schoolId, s).trim().toLowerCase() === getSchoolName(selectedSchedule.schoolId, selectedSchedule).trim().toLowerCase())))
+                              .filter(s => {
+                                const cName = getClassName(s.classId).toLowerCase();
+                                const sName = getSchoolName(s.schoolId, s).toLowerCase();
+                                if (cName.includes('chuyên môn') || sName.includes('chuyên môn') || cName.includes('họp') || sName.includes('họp')) return false;
+                                return true;
+                              })
+                              .map(scItem => {
+                                const existingAtt = attendance.find(a => !(a as any).isDeleted && a.teacherId === currentTeacher?.id && a.date === todayStr && (a.scheduleId === scItem.id || (a.schoolId === scItem.schoolId && a.classId === scItem.classId)));
+                                const isCheckedInWithPhoto = existingAtt && (existingAtt.hasSelfie || (existingAtt.selfieImage && existingAtt.selfieImage.length > 50));
+                                const isManualCheckedIn = existingAtt && !isCheckedInWithPhoto;
+                                const cancellation = schoolCancellations.find(c => c.teacherId === currentTeacher?.id && c.date === todayStr && (c.scheduleId === scItem.id || (c.schoolId === scItem.schoolId && c.classId === scItem.classId)));
+                                const isCancelled = !!cancellation;
+                                const isSelected = selectedCheckinScheduleIds.includes(scItem.id);
+
+                                return (
+                                  <label 
+                                    key={scItem.id} 
+                                    className={`flex items-center justify-between p-2.5 rounded-xl border transition cursor-pointer ${
+                                      isCheckedInWithPhoto ? 'bg-emerald-50/70 border-emerald-200 opacity-75' :
+                                      isCancelled ? 'bg-rose-50/70 border-rose-200 opacity-75 cursor-not-allowed' :
+                                      isManualCheckedIn ? 'bg-amber-50/90 border-amber-300 shadow-sm' :
+                                      isSelected ? 'bg-indigo-50/90 border-indigo-300 shadow-sm' : 'bg-white border-slate-200 opacity-60'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2.5">
+                                      <input
+                                        type="checkbox"
+                                        disabled={isCheckedInWithPhoto || isCancelled}
+                                        checked={isCheckedInWithPhoto ? true : isCancelled ? false : isSelected}
+                                        onChange={(e) => {
+                                          if (isCheckedInWithPhoto || isCancelled) return;
+                                          if (e.target.checked) {
+                                            setSelectedCheckinScheduleIds(prev => [...prev, scItem.id]);
+                                          } else {
+                                            setSelectedCheckinScheduleIds(prev => prev.filter(id => id !== scItem.id));
+                                          }
+                                        }}
+                                        className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
+                                      />
+                                      <div>
+                                        <span className="font-bold text-slate-800 text-xs block">{getClassName(scItem.classId)} ({scItem.session})</span>
+                                        <span className="text-[10px] text-slate-500 font-mono">Thời lượng: {scItem.periods} tiết</span>
+                                      </div>
+                                    </div>
+
+                                    <div>
+                                      {isCheckedInWithPhoto && (
+                                        <span className="text-[9px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">✓ Đã chụp ảnh</span>
+                                      )}
+                                      {isManualCheckedIn && !isCheckedInWithPhoto && (
+                                        <span className="text-[9px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">⚠️ Nhập tay (Bấm chụp bù)</span>
+                                      )}
+                                      {isCancelled && (
+                                        <span className="text-[9px] font-bold text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full">
+                                          {cancellation.cancellationType === 'arrived' ? 'Trường nghỉ (Tới trường)' : 'Trường nghỉ (Báo trước)'}
+                                        </span>
+                                      )}
+                                      {!existingAtt && !isCancelled && (
+                                        <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${isSelected ? 'text-indigo-700 bg-indigo-100' : 'text-slate-500 bg-slate-200'}`}>
+                                          {isSelected ? 'Sẽ điểm danh' : 'Bỏ qua (Không dạy)'}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </label>
+                                );
+                              })}
+                          </div>
+                        </div>
+
                         {/* GPS distance dynamic display (LOCKED ADMIN) */}
                         <div className="p-3.5 bg-neutral-50 rounded-2xl border border-neutral-200 space-y-2 opacity-80">
                           <div className="flex items-center justify-between">
@@ -1657,26 +2551,48 @@ export default function TeacherDashboard({
                         <div className="space-y-2">
                           <label className="font-bold text-neutral-500 block">Xác thực ảnh khuôn mặt (Xác nhận an toàn):</label>
                           
-                          <div className="relative aspect-video w-full rounded-2xl overflow-hidden border border-neutral-200 bg-neutral-100 flex flex-col items-center justify-center">
+                          <div className="relative aspect-video w-full rounded-2xl overflow-hidden border border-neutral-200 bg-neutral-100 flex flex-col items-center justify-center shadow-inner">
                             {isCameraActive ? (
-                              <video 
-                                ref={videoRef} 
-                                autoPlay 
-                                playsInline 
-                                muted
-                                className="w-full h-full object-cover scale-x-[-1]"
-                              />
+                              <div className="relative w-full h-full">
+                                <video 
+                                  ref={videoRef} 
+                                  autoPlay 
+                                  playsInline 
+                                  muted
+                                  className="w-full h-full object-cover scale-x-[-1]"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={captureSelfiePhoto}
+                                  className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-full font-bold text-xs shadow-lg flex items-center gap-1.5 border border-emerald-400 active:scale-95 transition animate-bounce"
+                                >
+                                  <Check className="h-4 w-4" /> Bấm Chụp Ảnh Này
+                                </button>
+                              </div>
                             ) : capturedImage ? (
-                              <img src={capturedImage} alt="captured thumbnail" className="w-full h-full object-cover" />
+                              <div className="relative w-full h-full">
+                                <img src={capturedImage} alt="captured thumbnail" className="w-full h-full object-cover" />
+                                <div className="absolute top-2 right-2 bg-emerald-600 text-white text-[10px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1 shadow-md">
+                                  <CheckCircle2 className="h-3.5 w-3.5" /> Đã Chụp Xong
+                                </div>
+                              </div>
                             ) : (
                               <div className="text-center space-y-1.5 text-neutral-400 p-4">
                                 <Camera className="h-8 w-8 mx-auto opacity-40 text-blue-600" />
-                                <p className="text-[10px] leading-normal">Bắt buộc tự chụp chân dung tại bục giảng để kiểm tra gian lận</p>
+                                <p className="text-[10px] leading-normal font-medium">Bắt buộc tự chụp chân dung tại bục giảng để xác thực</p>
                               </div>
                             )}
 
-                            {/* Hidden canvas for static draw capture */}
+                            {/* Hidden canvas and file input */}
                             <canvas ref={canvasRef} className="hidden" />
+                            <input 
+                              type="file" 
+                              ref={fileInputRef} 
+                              accept="image/*" 
+                              capture="user" 
+                              className="hidden" 
+                              onChange={handleSelfieFileUpload} 
+                            />
                           </div>
 
                           {/* Webcam buttons togglers */}
@@ -1685,18 +2601,45 @@ export default function TeacherDashboard({
                               <button 
                                 type="button" 
                                 onClick={captureSelfiePhoto}
-                                className="w-full py-2 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 transition flex items-center justify-center gap-1"
+                                className="w-full py-2.5 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 transition flex items-center justify-center gap-1.5 shadow-md"
                               >
-                                <Check className="h-4.5 w-4.5" /> Bấm Chụp Ảnh
+                                <Check className="h-4.5 w-4.5" /> Bấm Chụp Ảnh Này
                               </button>
+                            ) : capturedImage ? (
+                              <div className="flex w-full gap-2">
+                                <button 
+                                  type="button" 
+                                  onClick={startCamera}
+                                  className="flex-1 py-2 bg-slate-700 text-white rounded-xl font-bold hover:bg-slate-800 transition flex items-center justify-center gap-1 text-xs shadow-sm"
+                                >
+                                  <RotateCcw className="h-3.5 w-3.5" /> Chụp Lại
+                                </button>
+                                <button 
+                                  type="button" 
+                                  onClick={() => fileInputRef.current?.click()}
+                                  className="py-2 px-3.5 bg-neutral-150 text-neutral-700 border border-neutral-200 rounded-xl font-bold hover:bg-neutral-200 transition flex items-center justify-center gap-1 text-xs"
+                                >
+                                  <Upload className="h-3.5 w-3.5" /> Chọn Tệp Ảnh
+                                </button>
+                              </div>
                             ) : (
-                              <button 
-                                type="button" 
-                                onClick={startCamera}
-                                className="w-full py-2 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition flex items-center justify-center gap-1"
-                              >
-                                <Camera className="h-4.5 w-4.5" /> Kích Hoạt Camera
-                              </button>
+                              <div className="flex w-full gap-2">
+                                <button 
+                                  type="button" 
+                                  onClick={startCamera}
+                                  className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition flex items-center justify-center gap-1.5 shadow-sm"
+                                >
+                                  <Camera className="h-4.5 w-4.5" /> Kích Hoạt Camera
+                                </button>
+                                <button 
+                                  type="button" 
+                                  onClick={() => fileInputRef.current?.click()}
+                                  className="py-2.5 px-3 bg-neutral-100 border border-neutral-200 text-neutral-700 rounded-xl font-bold hover:bg-neutral-200 transition flex items-center justify-center gap-1.5 text-xs font-semibold"
+                                  title="Chụp trực tiếp bằng camera điện thoại hoặc tải ảnh từ máy"
+                                >
+                                  <Upload className="h-4 w-4" /> Tải Ảnh
+                                </button>
+                              </div>
                             )}
                           </div>
                         </div>
@@ -1742,9 +2685,18 @@ export default function TeacherDashboard({
                       {/* Submit final checkin */}
                       <button 
                         type="submit"
-                        className="w-full py-3 text-white bg-slate-900 rounded-2xl font-bold tracking-tight hover:bg-slate-800 transition shadow-md"
+                        className="w-full py-3 text-white bg-slate-900 rounded-2xl font-bold tracking-tight hover:bg-slate-800 transition shadow-md cursor-pointer"
                       >
                         Nộp Chấm Công Check-In
+                      </button>
+
+                      {/* Trường báo nghỉ quick button */}
+                      <button 
+                        type="button"
+                        onClick={() => handleOpenSchoolClosedModal(selectedSchedule)}
+                        className="w-full py-2.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 rounded-2xl font-bold text-xs transition cursor-pointer flex items-center justify-center gap-1.5 shadow-xs mt-2"
+                      >
+                        <span>🏫</span> TRƯỜNG NGHỈ HÔM NAY (HỦY CA & TÍNH TIẾT)
                       </button>
 
                     </div>
@@ -1783,11 +2735,57 @@ export default function TeacherDashboard({
                       }}
                     >
                       <option value="sick_leave">Nghỉ ốm / Việc bận cá nhân (Mất chuyên cần)</option>
-                      <option value="swap_shift">Đổi ca dạy với Giáo viên khác</option>
+                      <option value="emergency_swap">Đổi ca khẩn cấp (Đi dạy thay GV khác / Giữ chuyên cần)</option>
                       <option value="substitute_teacher">Nhờ người dạy thay (55.000 VNĐ/tiết)</option>
                       <option value="art_performance">Coi diễn văn nghệ (100k/trường, Giữ chuyên cần)</option>
                     </select>
                   </div>
+
+                  {(reqType === 'emergency_swap' || reqType === 'swap_shift') && (
+                    <div className="bg-amber-50/80 p-3.5 rounded-xl border border-amber-200/80 space-y-3">
+                      <div className="text-[11px] font-bold text-amber-900 flex items-center gap-1.5">
+                        <span className="text-amber-600 text-sm">⚡</span> Đổi ca khẩn cấp: Đi dạy thay cho Giáo viên khác (Giữ chuyên cần)
+                      </div>
+
+                      <div className="space-y-2 pt-2 border-t border-amber-200/60">
+                        <label className="block text-[11px] font-bold text-slate-700">Xử lý ca gốc của bạn vào ngày/buổi này *</label>
+                        <div className="space-y-2">
+                          <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-700 font-semibold">
+                            <input 
+                              type="radio" 
+                              name="emergencySubMode" 
+                              checked={emergencySubMode === 'has_substitute'} 
+                              onChange={() => setEmergencySubMode('has_substitute')}
+                            />
+                            1. Xếp Giáo viên khác dạy thay ca gốc của tôi
+                          </label>
+                          {emergencySubMode === 'has_substitute' && (
+                            <select
+                              value={emergencyTargetTeacherId}
+                              onChange={(e) => setEmergencyTargetTeacherId(e.target.value)}
+                              className="w-full border-amber-200 rounded-xl p-2 text-xs bg-white text-slate-800 font-medium"
+                            >
+                              <option value="">-- Để Ban Giám Đốc tự chỉ định GV dạy ca gốc --</option>
+                              {teachers.filter(t => t.id !== currentTeacher?.id).map(t => (
+                                <option key={t.id} value={t.id}>{t.name}</option>
+                              ))}
+                            </select>
+                          )}
+
+                          <label className="flex items-start gap-2 cursor-pointer text-xs text-slate-700 font-semibold pt-1">
+                            <input 
+                              type="radio" 
+                              name="emergencySubMode" 
+                              className="mt-0.5"
+                              checked={emergencySubMode === 'no_substitute'} 
+                              onChange={() => setEmergencySubMode('no_substitute')}
+                            />
+                            <span>2. Không có GV thay ca gốc (Tạm nghỉ ca gốc - <strong>Vẫn giữ chuyên cần</strong> vì đi dạy thay cho người khác)</span>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {reqType === 'substitute_teacher' && (
                     <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/60 space-y-2.5">
@@ -1821,6 +2819,22 @@ export default function TeacherDashboard({
                         </label>
                       </div>
 
+                      {substituteMode === 'regular' && (
+                        <div className="space-y-1.5 pt-2 border-t border-slate-200">
+                          <label className="block text-[11px] font-bold text-slate-700">Giáo viên nhờ dạy thay (Nếu đã thỏa thuận trước)</label>
+                          <select
+                            value={substituteTargetTeacherId}
+                            onChange={(e) => setSubstituteTargetTeacherId(e.target.value)}
+                            className="w-full border border-slate-200 rounded-xl p-2.5 text-xs bg-white text-slate-800 font-medium"
+                          >
+                            <option value="">-- Để Ban Giám Đốc / Quản Lý chỉ định --</option>
+                            {teachers.filter(t => !t.isDeleted && t.id !== currentTeacher?.id).map(t => (
+                              <option key={t.id} value={t.id}>{t.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
                       {substituteMode === 'past_leave' && (
                         <div className="space-y-2">
                           <label className="block text-[11px] font-bold text-slate-600 mb-1">
@@ -1850,22 +2864,30 @@ export default function TeacherDashboard({
                                         if (updated.length > 0) {
                                           const selectedDetails = updated.map(id => {
                                             if (id.startsWith('leave_')) {
-                                              const leaveId = id.replace('leave_', '');
+                                              const parts = id.split('_');
+                                              const leaveId = parts[1];
+                                              const schedId = parts.slice(2).join('_');
                                               const req = changes.find(c => c.id === leaveId);
                                               if (req) {
                                                 const [y, m, d] = req.date.split('-');
-                                                const reqDateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
-                                                const reqDayOfWeek = reqDateObj.getDay() === 0 ? 8 : reqDateObj.getDay() + 1;
-                                                const origSched = schedules.find(s => s.teacherId === currentTeacher.id && s.dayOfWeek === reqDayOfWeek && getSessionCategory(s.session) === req.session && !s.isDeleted);
-                                                
-                                                const schoolName = origSched ? getSchoolName(origSched.schoolId, origSched) : '';
-                                                const classNameStr = origSched ? getClassName(origSched.classId) : '';
-                                                return { date: `${d}/${m}/${y}`, session: req.session, schoolName, classNameStr, reason: req.reason };
+                                                const sched = schedId ? schedules.find(s => s.id === schedId) : null;
+                                                if (sched) {
+                                                  const schoolName = getSchoolName(sched.schoolId, sched);
+                                                  const classNameStr = getClassName(sched.classId);
+                                                  return { date: `${d}/${m}/${y}`, session: req.session, schoolName, classNameStr, reason: req.reason };
+                                                } else {
+                                                  const reqDateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+                                                  const reqDayOfWeek = reqDateObj.getDay() === 0 ? 8 : reqDateObj.getDay() + 1;
+                                                  const origSched = schedules.find(s => s.teacherId === currentTeacher.id && s.dayOfWeek === reqDayOfWeek && getSessionCategory(s.session) === req.session && !s.isDeleted);
+                                                  const schoolName = origSched ? getSchoolName(origSched.schoolId, origSched) : '';
+                                                  const classNameStr = origSched ? getClassName(origSched.classId) : '';
+                                                  return { date: `${d}/${m}/${y}`, session: req.session, schoolName, classNameStr, reason: req.reason };
+                                                }
                                               }
                                             } else if (id.startsWith('missed_')) {
                                               const parts = id.split('_');
-                                              const schedId = parts[1];
-                                              const dateStr = parts.slice(2).join('_');
+                                              const schedId = parts.slice(1, parts.length - 1).join('_');
+                                              const dateStr = parts[parts.length - 1];
                                               const sched = schedules.find(s => s.id === schedId);
                                               if (sched) {
                                                 const [y, m, d] = dateStr.split('-');
@@ -1953,19 +2975,85 @@ export default function TeacherDashboard({
                     </div>
                   )}
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-500 mb-1">Lý do / Tên trường chi tiết *</label>
+                    <label className="block text-[11px] font-bold text-slate-500 mb-1">
+                      {(reqType === 'emergency_swap' || reqType === 'swap_shift') 
+                        ? 'Chi tiết trường/lớp bạn đi dạy thay & lý do đổi ca khẩn cấp *' 
+                        : 'Lý do / Tên trường chi tiết *'}
+                    </label>
                     <textarea 
                       value={reqReason}
                       onChange={(e) => setReqReason(e.target.value)}
-                      placeholder="Trình bày lý do..."
+                      placeholder={(reqType === 'emergency_swap' || reqType === 'swap_shift') ? "VD: Đi dạy thay khẩn cấp cho GV Nguyễn Văn A tại Trường Mầm Non..." : "Trình bày lý do..."}
                       rows={3}
                       required
                       className="w-full border-slate-200 rounded-xl p-2.5 text-xs bg-slate-50 resize-none"
                     />
                   </div>
+
+                  {/* Proof Image Upload / Capture */}
+                  <div className="space-y-1.5 p-3 bg-slate-50 rounded-2xl border border-slate-200/80">
+                    <label className="block text-[11px] font-bold text-slate-700 flex items-center justify-between">
+                      <span className="flex items-center gap-1">
+                        <Paperclip className="w-3.5 h-3.5 text-blue-600" />
+                        Đính kèm ảnh minh chứng (Tùy chọn)
+                      </span>
+                      <span className="text-[9px] text-slate-400 font-normal">Giấy khám, tin nhắn, hình ảnh...</span>
+                    </label>
+
+                    {proofImagePreview ? (
+                      <div className="relative group rounded-xl overflow-hidden border border-slate-200 bg-white p-2 flex items-center gap-3">
+                        <img 
+                          src={proofImagePreview} 
+                          alt="Proof Preview" 
+                          className="w-16 h-16 object-cover rounded-lg border border-slate-100 shadow-xs cursor-pointer"
+                          onClick={() => setSelectedProofModal({ url: proofImagePreview, title: 'Ảnh minh chứng của bạn' })}
+                        />
+                        <div className="flex-1 space-y-1">
+                          <span className="text-[11px] font-bold text-emerald-700 flex items-center gap-1">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Đã nén & sẵn sàng gửi
+                          </span>
+                          <p className="text-[9px] text-slate-500">Bấm vào ảnh để xem kích thước lớn</p>
+                          <button
+                            type="button"
+                            onClick={() => setProofImagePreview('')}
+                            className="text-[10px] text-rose-600 hover:text-rose-700 font-bold flex items-center gap-0.5"
+                          >
+                            <X className="w-3 h-3" /> Gỡ ảnh này
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2">
+                        <label className="flex-1 py-2 px-3 bg-white border border-dashed border-slate-300 hover:border-blue-400 rounded-xl text-center cursor-pointer transition flex items-center justify-center gap-1.5 text-slate-600 hover:text-blue-600 font-semibold text-[11px]">
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>{isCompressingProof ? 'Đang nén ảnh...' : 'Chọn từ thư viện'}</span>
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            className="hidden" 
+                            onChange={handleProofImageChange}
+                            disabled={isCompressingProof}
+                          />
+                        </label>
+                        <label className="py-2 px-3 bg-white border border-dashed border-slate-300 hover:border-blue-400 rounded-xl text-center cursor-pointer transition flex items-center justify-center gap-1.5 text-slate-600 hover:text-blue-600 font-semibold text-[11px]">
+                          <Camera className="w-3.5 h-3.5" />
+                          <span>Chụp ảnh</span>
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            capture="environment" 
+                            className="hidden" 
+                            onChange={handleProofImageChange}
+                            disabled={isCompressingProof}
+                          />
+                        </label>
+                      </div>
+                    )}
+                  </div>
+
                   <button
                     type="submit"
-                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl transition"
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl transition cursor-pointer shadow-sm"
                   >
                     Gửi Đơn Lên Quản Lý
                   </button>
@@ -1977,19 +3065,28 @@ export default function TeacherDashboard({
                     <p className="text-center text-slate-400 py-4 italic text-[11px]">Chưa có đơn nào.</p>
                   ) : (
                     <div className="space-y-3">
-                      {changes.filter(c => c.teacherId === currentTeacher.id).map(c => (
+                      {[...changes]
+                        .filter(c => c.teacherId === currentTeacher.id)
+                        .sort((a, b) => {
+                          if (a.status === 'pending' && b.status !== 'pending') return -1;
+                          if (a.status !== 'pending' && b.status === 'pending') return 1;
+                          if (a.date && b.date && a.date !== b.date) return b.date.localeCompare(a.date);
+                          if (a.createdAt && b.createdAt && a.createdAt !== b.createdAt) return b.createdAt.localeCompare(a.createdAt);
+                          return (b.id || '').localeCompare(a.id || '');
+                        })
+                        .map(c => (
                         <div key={c.id} className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex flex-col gap-2 relative overflow-hidden">
                           <div className="flex justify-between items-start">
                             <div>
                               <span className="font-bold text-blue-900 block">
                                 {c.requestType === 'sick_leave' ? 'Nghỉ có phép' : 
-                                 c.requestType === 'swap_shift' ? 'Đổi ca dạy' : 
+                                 (c.requestType === 'swap_shift' || c.requestType === 'emergency_swap') ? 'Đổi ca khẩn cấp (Giữ chuyên cần)' : 
                                  c.requestType === 'art_performance' ? 'Coi diễn văn nghệ' : 'Nhờ người dạy thay'}
                               </span>
                               <span className="text-[10px] text-slate-500">{c.date} - {c.session === 'morning' ? 'Sáng' : 'Chiều'}</span>
-                              {(c.requestType === 'substitute_teacher' || c.requestType === 'sick_leave') && c.status === 'approved' && (
+                              {(c.requestType === 'substitute_teacher' || c.requestType === 'sick_leave' || c.requestType === 'emergency_swap' || c.requestType === 'swap_shift') && c.status === 'approved' && (
                                 <span className="text-[10px] block font-medium mt-0.5 text-indigo-700">
-                                  GV dạy thay: {c.targetTeacherId === 'no_substitute' ? 'Không có người dạy thay (Thiếu tiết)' : teachers.find(t => t.id === c.targetTeacherId)?.name || 'Không có người dạy thay'}
+                                  GV dạy thay ca gốc: {c.targetTeacherId === 'no_substitute' ? 'Không có người dạy thay (Giữ chuyên cần)' : teachers.find(t => t.id === c.targetTeacherId)?.name || 'Chờ Admin xếp GV'}
                                 </span>
                               )}
                             </div>
@@ -2002,6 +3099,22 @@ export default function TeacherDashboard({
                             </span>
                           </div>
                           <p className="text-[10px] text-slate-600 italic bg-white p-2 rounded-lg border border-slate-100 mt-1">"{c.reason}"</p>
+                          
+                          {c.proofImage && (
+                            <div className="pt-1">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedProofModal({ 
+                                  url: c.proofImage!, 
+                                  title: `Ảnh minh chứng - ${c.date} (${c.requestType === 'sick_leave' ? 'Nghỉ phép' : 'Đơn từ'})` 
+                                })}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-[10px] font-bold transition border border-blue-100 cursor-pointer"
+                              >
+                                <Eye className="w-3 h-3" />
+                                <span>Xem ảnh minh chứng kèm theo</span>
+                              </button>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -2041,21 +3154,60 @@ export default function TeacherDashboard({
                       const [y, m, d] = c.date.split('-');
                       const reqDateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
                       const reqDayOfWeek = reqDateObj.getDay() === 0 ? 8 : reqDateObj.getDay() + 1;
-                      let originalSchedules = schedules.filter(s => !s.isDeleted && s.teacherId === c.originalTeacherId && s.dayOfWeek === reqDayOfWeek && getSessionCategory(s.session) === c.session);
-                      
+                      let originalSchedules: Schedule[] = [];
                       let isFallback = false;
-                      if (originalSchedules.length === 0) {
-                         // Fallback: list all active schedules of the original teacher
-                          const reasonLower = (c.reason || '').toLowerCase();
-                          originalSchedules = schedules.filter(s => {
-                            if (s.isDeleted || s.teacherId !== c.originalTeacherId) return false;
-                            const schoolName = getSchoolName(s.schoolId, s).toLowerCase();
-                            return reasonLower.includes(schoolName) || schoolName.includes(reasonLower);
-                          });
-                          if (originalSchedules.length === 0) {
-                            originalSchedules = schedules.filter(s => !s.isDeleted && s.teacherId === c.originalTeacherId);
+                      if (c.targetScheduleId && c.targetScheduleId.trim()) {
+                        const itemIds = c.targetScheduleId.split(',').map(s => s.trim()).filter(Boolean);
+                        itemIds.forEach(itemId => {
+                          if (itemId.startsWith('missed_')) {
+                            const parts = itemId.split('_');
+                            const schedId = parts.slice(1, parts.length - 1).join('_');
+                            const s = schedules.find(x => x.id === schedId && !x.isDeleted && x.teacherId === c.originalTeacherId);
+                            if (s) originalSchedules.push(s);
+                          } else if (itemId.startsWith('leave_')) {
+                            const reqId = itemId.replace('leave_', '');
+                            const parts = reqId.split('_');
+                            if (parts.length > 1) {
+                              const schedId = parts.slice(1).join('_');
+                              const s = schedules.find(x => x.id === schedId && !x.isDeleted && x.teacherId === c.originalTeacherId);
+                              if (s) originalSchedules.push(s);
+                            } else {
+                              const origReq = changes.find(ch => ch.id === reqId);
+                              if (origReq) {
+                                const [y, m, d] = origReq.date.split('-');
+                                const reqDateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+                                const reqDayOfWeek = reqDateObj.getDay() === 0 ? 8 : reqDateObj.getDay() + 1;
+                                const dayScheds = schedules.filter(s => 
+                                  !s.isDeleted && 
+                                  s.teacherId === origReq.originalTeacherId && 
+                                  s.dayOfWeek === reqDayOfWeek && 
+                                  getSessionCategory(s.session) === origReq.session
+                                );
+                                originalSchedules.push(...dayScheds);
+                              }
+                            }
+                          } else {
+                            const s = schedules.find(x => x.id === itemId && !x.isDeleted && x.teacherId === c.originalTeacherId);
+                            if (s) originalSchedules.push(s);
                           }
-                         isFallback = true;
+                        });
+                        isFallback = true;
+                      }
+                      
+                      if (originalSchedules.length === 0) {
+                        originalSchedules = schedules.filter(s => !s.isDeleted && s.teacherId === c.originalTeacherId && s.dayOfWeek === reqDayOfWeek && getSessionCategory(s.session) === getSessionCategory(c.session));
+                        if (originalSchedules.length === 0) {
+                           const reasonLower = (c.reason || '').toLowerCase();
+                           originalSchedules = schedules.filter(s => {
+                             if (s.isDeleted || s.teacherId !== c.originalTeacherId || s.dayOfWeek !== reqDayOfWeek) return false;
+                             const schoolName = getSchoolName(s.schoolId, s).toLowerCase();
+                             return reasonLower.includes(schoolName) || schoolName.includes(reasonLower);
+                           });
+                           if (originalSchedules.length === 0) {
+                             originalSchedules = schedules.filter(s => !s.isDeleted && s.teacherId === c.originalTeacherId && s.dayOfWeek === reqDayOfWeek);
+                           }
+                           isFallback = true;
+                        }
                       }
 
                       if (originalSchedules.length === 0) {
@@ -2112,7 +3264,10 @@ export default function TeacherDashboard({
                                       } else {
                                         setMakeupDate(c.date);
                                         setMakeupScheduleId(originalSchedule.id);
+                                        const origTeacher = teachers.find(t => t.id === c.originalTeacherId)?.name || 'Đồng nghiệp';
+                                        setMakeupReason(`Dạy thay cho ${origTeacher} ngày ${c.date}`);
                                         setShowMakeupForm(true);
+                                        setHomeSubTab('history');
                                         setMobileTab('home');
                                       }
                                     }}
@@ -2133,50 +3288,65 @@ export default function TeacherDashboard({
               </div>
             )}
             
-            {/* TAB: SALARY SLIP (BẢNG LƯƠNG CHI TIẾT TẠM TÍNH) */}
+            {/* TAB: SALARY SLIP (BẢNG LƯƠNG CHI TIẾT TẠM TÍNH & XUẤT ẢNH ZALO) */}
             {mobileTab === 'salary' && (
               <div className="space-y-4 animate-fadeIn text-xs">
-                <h3 className="font-bold text-sm border-b pb-2">Bảng lương tạm tính của bạn</h3>
-                <p className="text-[11px] text-slate-500">Giải trình thù lao tháng {reportMonthDisplay} dựa trên số tiết dạy thực tế ghi nhận thành công từ GPS/Webcam</p>
+                <div className="flex items-center justify-between border-b pb-2">
+                  <div>
+                    <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">
+                      <DollarSign className="w-4 h-4 text-emerald-600" /> Bảng Lương & Thù Lao Của Bạn
+                    </h3>
+                    <p className="text-[11px] text-slate-500">Kỳ quyết toán tháng {reportMonthDisplay} - Dữ liệu đồng bộ tự động</p>
+                  </div>
+                </div>
 
-                <div className="space-y-3 pt-2">
-                  <div className="p-4 bg-slate-50 rounded-2xl space-y-2 border border-slate-100">
-                    <span className="text-[9px] uppercase font-mono text-slate-400 font-bold block">TIẾT DẠY ĐƯỢC DUYỆT CÔNG THÁNG NÀY</span>
-                    <strong className="text-2xl text-blue-900 font-mono">{totalVerifiedSchedules} <span className="text-xs font-normal text-slate-500">tiết</span></strong>
+                <div className="space-y-3 pt-1">
+                  {/* Highlight Hero Card */}
+                  <div className="p-4 bg-gradient-to-br from-slate-900 to-indigo-950 text-white rounded-3xl space-y-2 border border-slate-800 shadow-md relative overflow-hidden">
+                    <div className="flex justify-between items-start relative z-10">
+                      <div>
+                        <span className="text-[9px] uppercase font-mono text-indigo-300 font-bold block">TỔNG TIẾT DUYỆT CÔNG THÁNG NÀY</span>
+                        <strong className="text-3xl text-white font-mono font-extrabold">{totalVerifiedSchedules} <span className="text-xs font-normal text-indigo-200">tiết dạy</span></strong>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[9px] uppercase font-mono text-emerald-400 font-bold block">TỔNG THỰC LĨNH DỰ KIẾN</span>
+                        <strong className="text-xl text-emerald-400 font-mono font-extrabold">{netEarnings.toLocaleString('vi-VN')} đ</strong>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-white/10 flex justify-between items-center text-[10px] text-white/70 font-mono relative z-10">
+                      <span>Đơn giá chuẩn: <b>{currentTeacher.hourlyRate.toLocaleString('vi-VN')} đ/tiết</b></span>
+                      <span>Chuyên cần: <b className={hasApprovedLeave ? "text-rose-400" : "text-emerald-400"}>{!hasApprovedLeave ? "+300.000 đ" : "0 đ (Nghỉ phép)"}</b></span>
+                    </div>
                   </div>
 
                   {/* Math breakdowns list */}
-                  <div className="divide-y divide-slate-100 space-y-2 text-xs">
-                    <div className="flex justify-between pt-2">
-                      <span className="text-slate-500">Họ và tên:</span>
-                      <strong className="text-slate-800">{currentTeacher.name}</strong>
+                  <div className="bg-white p-4 rounded-3xl border border-slate-150 shadow-xs divide-y divide-slate-100 space-y-2 text-xs">
+                    <div className="flex justify-between pb-1">
+                      <span className="text-slate-500 font-medium">Họ và tên giáo viên:</span>
+                      <strong className="text-slate-900 font-semibold">{currentTeacher.name} ({currentTeacher.id})</strong>
                     </div>
 
                     <div className="flex justify-between pt-2">
-                      <span className="text-slate-500">Đơn giá (chính):</span>
-                      <span className="font-mono">{currentTeacher.hourlyRate.toLocaleString('vi-VN')} đ /tiết</span>
-                    </div>
-
-                    <div className="flex justify-between pt-2">
-                      <span className="text-slate-500">Dạy chính ({regularPeriods} tiết):</span>
-                      <span className="font-mono font-semibold">{((regularPeriods || 0) * (currentTeacher?.hourlyRate || 0)).toLocaleString('vi-VN')} đ</span>
+                      <span className="text-slate-600">1. Tiết dạy chính ngạch ({regularPeriods} tiết):</span>
+                      <span className="font-mono font-bold text-slate-800">{((regularPeriods || 0) * (currentTeacher?.hourlyRate || 0)).toLocaleString('vi-VN')} đ</span>
                     </div>
 
                     {currentBonusPeriods > 0 && (
                       <div className="flex justify-between pt-2">
-                        <span className="text-slate-500">Tiết bổ sung hệ thống ({currentBonusPeriods} tiết):</span>
+                        <span className="text-slate-600">2. Tiết bổ sung điều chỉnh ({currentBonusPeriods} tiết):</span>
                         <div className="text-right">
-                          <span className="font-mono text-purple-600 font-semibold">+{((currentBonusPeriods || 0) * (currentTeacher?.hourlyRate || 0)).toLocaleString('vi-VN')} đ</span>
-                          <span className="block text-[9px] text-purple-500 italic">Hỗ trợ dạy 1, 2 tiết</span>
+                          <span className="font-mono text-purple-600 font-bold">+{((currentBonusPeriods || 0) * (currentTeacher?.hourlyRate || 0)).toLocaleString('vi-VN')} đ</span>
+                          <span className="block text-[9px] text-purple-500 italic">Hỗ trợ lớp đặc biệt</span>
                         </div>
                       </div>
                     )}
 
                     {substitutePeriods > 0 && (
                       <div className="flex justify-between pt-2">
-                        <span className="text-slate-500">Dạy thay ({substitutePeriods} tiết):</span>
+                        <span className="text-slate-600">3. Dạy thay / Dạy thế ca ({substitutePeriods} tiết):</span>
                         <div className="text-right">
-                          <span className="font-mono text-blue-600 font-semibold">+{substituteWagesEarned.toLocaleString('vi-VN')} đ</span>
+                          <span className="font-mono text-blue-600 font-bold">+{substituteWagesEarned.toLocaleString('vi-VN')} đ</span>
                           <span className="block text-[9px] text-blue-500 italic">55.000 đ/tiết dạy thế</span>
                         </div>
                       </div>
@@ -2184,40 +3354,60 @@ export default function TeacherDashboard({
 
                     {schoolClosedArrivedPeriods > 0 && (
                       <div className="flex justify-between pt-2">
-                        <span className="text-slate-500">Trường nghỉ (Tới nơi mới báo - {schoolClosedArrivedPeriods} ca):</span>
+                        <span className="text-slate-600">4. Hỗ trợ trường nghỉ (Tới nơi mới báo - {schoolClosedArrivedPeriods} ca):</span>
                         <div className="text-right">
-                          <span className="font-mono text-emerald-600 font-semibold">+{((schoolClosedArrivedPeriods || 0) * (currentTeacher?.hourlyRate || 0)).toLocaleString('vi-VN')} đ</span>
+                          <span className="font-mono text-emerald-600 font-bold">+{((schoolClosedArrivedPeriods || 0) * (currentTeacher?.hourlyRate || 0)).toLocaleString('vi-VN')} đ</span>
                           <span className="block text-[9px] text-emerald-500 italic">Hỗ trợ +1 tiết /ca</span>
                         </div>
                       </div>
                     )}
 
                     <div className="flex justify-between pt-2">
-                      <span className="text-slate-500">Phụ cấp xăng xe:</span>
-                      <span className="font-mono text-emerald-600">+{currentAllowance.toLocaleString('vi-VN')} đ</span>
+                      <span className="text-slate-600">5. Phụ cấp xăng xe & đi lại:</span>
+                      <span className="font-mono text-emerald-600 font-bold">+{currentAllowance.toLocaleString('vi-VN')} đ</span>
                     </div>
 
                     <div className="flex justify-between pt-2">
-                      <span className="text-slate-500">Thưởng chuyên cần / Văn nghệ:</span>
+                      <span className="text-slate-600">6. Thưởng chuyên cần tháng:</span>
                       <div className="text-right flex flex-col items-end">
                         {hasApprovedLeave ? (
-                          <span className="font-mono text-red-500 line-through text-[10px]">{potentialBonus.toLocaleString('vi-VN')} đ</span>
+                          <>
+                            <span className="font-mono text-red-500 line-through text-[10px]">{potentialBonus.toLocaleString('vi-VN')} đ</span>
+                            <span className="text-[9px] text-red-500 italic">Mất C.Cần do có đơn nghỉ phép</span>
+                          </>
                         ) : (
-                          <span className="font-mono text-emerald-600 text-xs">+{potentialBonus.toLocaleString('vi-VN')} đ</span>
-                        )}
-                        {artPerformanceBonus > 0 && (
-                          <span className="font-mono text-blue-600 text-xs mt-0.5">+{artPerformanceBonus.toLocaleString('vi-VN')} đ (Văn nghệ)</span>
-                        )}
-                        {hasApprovedLeave && (
-                          <span className="text-[9px] text-red-500 italic mt-0.5">Mất C.Cần do xin phép/nghỉ</span>
+                          <span className="font-mono text-emerald-600 font-bold">+{potentialBonus.toLocaleString('vi-VN')} đ</span>
                         )}
                       </div>
                     </div>
 
-                    <div className="flex justify-between pt-2">
-                      <span className="text-slate-500">Khấu trừ phạt đi trễ:</span>
-                      <span className="font-mono text-red-500">-{currentTeacher.deduction.toLocaleString('vi-VN')} đ</span>
-                    </div>
+                    {artPerformanceBonus > 0 && (
+                      <div className="flex justify-between pt-2">
+                        <span className="text-slate-600">7. Thưởng coi diễn văn nghệ ({artEvents.length} sự kiện):</span>
+                        <span className="font-mono text-purple-600 font-bold">+{artPerformanceBonus.toLocaleString('vi-VN')} đ</span>
+                      </div>
+                    )}
+
+                    {currentTeacher.deduction > 0 && (
+                      <div className="flex justify-between pt-2">
+                        <span className="text-slate-600">8. Khấu trừ phạt vi phạm / Đi trễ:</span>
+                        <span className="font-mono text-red-500 font-bold">-{currentTeacher.deduction.toLocaleString('vi-VN')} đ</span>
+                      </div>
+                    )}
+
+                    {(currentTeacher.advanceSalary || 0) > 0 && (
+                      <div className="flex justify-between pt-2">
+                        <span className="text-slate-600">9. Tạm ứng lương trong tháng:</span>
+                        <span className="font-mono text-amber-600 font-bold">-{(currentTeacher.advanceSalary || 0).toLocaleString('vi-VN')} đ</span>
+                      </div>
+                    )}
+
+                    {(currentTeacher.socialInsurance || 0) > 0 && (
+                      <div className="flex justify-between pt-2">
+                        <span className="text-slate-600">10. Đóng Bảo hiểm xã hội:</span>
+                        <span className="font-mono text-red-500 font-bold">-{(currentTeacher.socialInsurance || 0).toLocaleString('vi-VN')} đ</span>
+                      </div>
+                    )}
 
                     <div className="flex justify-between pt-3 text-sm font-extrabold border-t border-slate-200">
                       <span className="text-slate-900">TỔNG THỰC LĨNH TẠM TÍNH:</span>
@@ -2226,7 +3416,7 @@ export default function TeacherDashboard({
                   </div>
 
                   <p className="text-[10px] text-neutral-400 italic bg-neutral-50 p-2.5 rounded-xl leading-normal">
-                    ⚠️ <b>Lưu ý:</b> Bảng lương này tự động đồng chỉnh từ lịch chấm công hằng ngày. Chỉ khi Admin phê duyệt, số liệu mới chính thức được ghi nhận để thanh toán vào cuối tháng.
+                    ⚠️ <b>Lưu ý:</b> Bảng lương này tự động đồng chỉnh từ lịch chấm công hằng ngày. Khi Admin phê duyệt chốt công, số liệu này là căn cứ chi trả chính thức vào ngày thanh toán lương.
                   </p>
                 </div>
               </div>
@@ -2595,11 +3785,20 @@ export default function TeacherDashboard({
                     
                     await onUpdateSchedules(newSchedules);
                     
+                    // Also synchronize existing attendance records with the updated schedule
+                    const updatedAttendance = attendance.map(a => a.scheduleId === finalItem.id ? {
+                      ...a,
+                      periods: finalItem.periods,
+                      schoolId: finalItem.schoolId,
+                      classId: finalItem.classId
+                    } : a);
+                    await onUpdateAttendance(updatedAttendance);
+
                     if (currentTeacher) {
                       onAddAuditLog(
                         'Sửa lịch dạy cá nhân',
                         currentUser?.username || 'Teacher',
-                        `Giáo viên ${currentTeacher.name} đã chủ động sửa lịch môn học của mình`
+                        `Giáo viên ${currentTeacher.name} đã chủ động sửa lịch môn học của mình (${finalItem.periods} tiết)`
                       );
                     }
                     setEditingScheduleItem(null);
@@ -2684,11 +3883,29 @@ export default function TeacherDashboard({
                     <label className="block text-[11px] font-bold text-slate-500 mb-1">Tổng Số Tiết</label>
                     <input 
                       type="number" 
-                      min="1" max="10" 
-                      value={editingScheduleItem.periods}
-                      onChange={e => setEditingScheduleItem({ ...editingScheduleItem, periods: parseInt(e.target.value) || 1 })}
-                      className="w-full text-xs p-2 border border-slate-200 rounded-lg text-slate-800"
+                      step="any"
+                      min="0.1" max="10" 
+                      placeholder="VD: 1, 0.5, 0.3..."
+                      value={editingScheduleItem.periods !== undefined && editingScheduleItem.periods !== null ? editingScheduleItem.periods : ''}
+                      onChange={e => setEditingScheduleItem({ ...editingScheduleItem, periods: parseFloat(e.target.value) || 0 })}
+                      className="w-full text-xs p-2 border border-slate-200 rounded-lg text-slate-800 font-mono"
                     />
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {[0.3, 0.5, 0.6, 0.7, 1, 1.5, 2, 3].map(val => (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() => setEditingScheduleItem({ ...editingScheduleItem, periods: val })}
+                          className={`text-[10px] px-1.5 py-0.5 rounded font-mono border transition cursor-pointer ${
+                            editingScheduleItem.periods === val 
+                              ? 'bg-blue-600 text-white border-blue-600 font-bold shadow-xs' 
+                              : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300'
+                          }`}
+                        >
+                          {val}t
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
                   <div className="pt-2 flex justify-between items-center gap-2">
@@ -2696,7 +3913,7 @@ export default function TeacherDashboard({
                       type="button" 
                       onClick={() => {
                         customConfirm('Xác nhận xoá', 'Bạn có chắc chắn muốn xoá lịch dạy này?', () => {
-                          onUpdateSchedules(schedules.filter(s => s.id !== editingScheduleItem.id));
+                          onUpdateSchedules(schedules.map(s => s.id === editingScheduleItem.id ? { ...s, isDeleted: true, deletedAt: new Date().toISOString() } : s));
                           setEditingScheduleItem(null);
                         });
                       }}
@@ -2764,89 +3981,215 @@ export default function TeacherDashboard({
           )}
 
           {/* School Closed Modal Overlay */}
-          {schoolClosedModalSchedule && (
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-              <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl border border-slate-100 animate-scaleIn">
-                <div className="p-6 space-y-4">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2.5 bg-rose-50 rounded-xl text-rose-600">
-                      <AlertCircle className="w-6 h-6" />
+          {schoolClosedModalSchedule && (() => {
+            const sameSchoolSchedules = todaySchedules.filter(s => s.schoolId === schoolClosedModalSchedule.schoolId);
+            const totalSelectedPeriods = sameSchoolSchedules
+              .filter(s => selectedCancelScheduleIds.includes(s.id))
+              .reduce((sum, s) => sum + (s.periods || 1), 0);
+
+            return (
+              <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[120] flex items-center justify-center p-4">
+                <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl border border-slate-100 animate-scaleIn">
+                  <div className="p-5 space-y-4 max-h-[80vh] overflow-y-auto">
+                    <div className="flex items-center gap-3 border-b pb-3">
+                      <div className="p-2.5 bg-rose-50 rounded-xl text-rose-600">
+                        <AlertCircle className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h3 className="font-extrabold text-slate-900 text-base leading-tight">
+                          Báo Trường Nghỉ
+                        </h3>
+                        <span className="text-[11px] text-slate-500 block font-medium">
+                          {getSchoolName(schoolClosedModalSchedule.schoolId, schoolClosedModalSchedule)}
+                        </span>
+                      </div>
                     </div>
-                    <div>
-                      <h3 className="font-extrabold text-slate-900 text-base leading-tight">
-                        Báo Trường Nghỉ
-                      </h3>
-                      <span className="text-[10px] text-slate-500">
-                        {getClassName(schoolClosedModalSchedule.classId)} - {getSchoolName(schoolClosedModalSchedule.schoolId, schoolClosedModalSchedule)}
-                      </span>
+                    
+                    {/* Phần 1: Chọn tiết/lớp báo nghỉ */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-slate-800">
+                          1. Chọn tiết / lớp trường báo nghỉ hôm nay:
+                        </label>
+                        {sameSchoolSchedules.length > 1 && (
+                          <div className="flex gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedCancelScheduleIds([schoolClosedModalSchedule.id])}
+                              className="text-[10px] text-blue-600 bg-blue-50 hover:bg-blue-100 font-semibold px-2 py-0.5 rounded-md cursor-pointer transition"
+                            >
+                              Chỉ tiết này
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedCancelScheduleIds(sameSchoolSchedules.map(s => s.id))}
+                              className="text-[10px] text-rose-600 bg-rose-50 hover:bg-rose-100 font-semibold px-2 py-0.5 rounded-md cursor-pointer transition"
+                            >
+                              Chọn tất cả ({sameSchoolSchedules.length} tiết)
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="space-y-1.5 bg-slate-50 p-2.5 rounded-2xl border border-slate-200/80 max-h-48 overflow-y-auto">
+                        {sameSchoolSchedules.map(scItem => {
+                          const isSelected = selectedCancelScheduleIds.includes(scItem.id);
+                          const isAlreadyCanceled = (schoolCancellations || []).some(c => 
+                            c.teacherId === currentTeacher?.id && 
+                            c.date === todayStr && 
+                            c.id !== schoolClosedModalSchedule.id &&
+                            (c.scheduleId === scItem.id || (c.schoolId === scItem.schoolId && c.classId === scItem.classId))
+                          );
+
+                          return (
+                            <label
+                              key={scItem.id}
+                              className={`flex items-center justify-between p-2 rounded-xl border transition cursor-pointer ${
+                                isSelected 
+                                  ? 'bg-rose-50 border-rose-300 text-rose-900 shadow-2xs' 
+                                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedCancelScheduleIds(prev => Array.from(new Set([...prev, scItem.id])));
+                                    } else {
+                                      if (selectedCancelScheduleIds.length <= 1) {
+                                        customAlert('Lưu ý', 'Phải chọn ít nhất 1 tiết/lớp để báo nghỉ!');
+                                        return;
+                                      }
+                                      setSelectedCancelScheduleIds(prev => prev.filter(id => id !== scItem.id));
+                                    }
+                                  }}
+                                  className="w-4 h-4 text-rose-600 rounded border-slate-300 focus:ring-rose-500 cursor-pointer"
+                                />
+                                <div className="truncate">
+                                  <span className="font-bold text-xs block truncate text-slate-800">
+                                    Lớp {getClassName(scItem.classId)}
+                                  </span>
+                                  <span className="text-[10px] text-slate-500">
+                                    Ca {getSessionShort(scItem.session)} • {scItem.periods} tiết
+                                    {isAlreadyCanceled && <span className="text-amber-600 ml-1.5 font-bold">(Đang báo nghỉ)</span>}
+                                  </span>
+                                </div>
+                              </div>
+                              <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
+                                isSelected ? 'bg-rose-200/80 text-rose-800' : 'bg-slate-100 text-slate-500'
+                              }`}>
+                                {scItem.periods}t
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                      <p className="text-[10px] text-slate-500 italic">
+                        💡 Các tiết không được chọn vẫn giữ nguyên để thầy/cô tiếp tục dạy và điểm danh bình thường.
+                      </p>
+                    </div>
+                    
+                    {/* Phần 2: Chọn phương án báo nghỉ */}
+                    <div className="space-y-2 pt-1 border-t border-slate-100">
+                      <p className="text-xs text-slate-800 font-bold">2. Chọn phương án báo nghỉ của trường:</p>
+                      
+                      <button 
+                        type="button"
+                        onClick={() => setClosedType('arrived')}
+                        className={`w-full text-left p-3 rounded-2xl border transition flex flex-col gap-1 cursor-pointer ${
+                          closedType === 'arrived' 
+                            ? 'border-blue-600 bg-blue-50/70 text-blue-900 shadow-xs' 
+                            : 'border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
+                            closedType === 'arrived' ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white'
+                          }`}>
+                            {closedType === 'arrived' && <div className="w-1.5 h-1.5 rounded-full bg-white"></div>}
+                          </span>
+                          <span className="text-xs font-bold">Đã tới trường mới báo nghỉ</span>
+                        </div>
+                        <span className="text-[10px] text-slate-500 pl-6">Giáo viên được tính <strong className="text-blue-600 font-extrabold">+1 tiết dạy</strong> hỗ trợ, không ảnh hưởng chuyên cần.</span>
+                      </button>
+
+                      <button 
+                        type="button"
+                        onClick={() => setClosedType('notified')}
+                        className={`w-full text-left p-3 rounded-2xl border transition flex flex-col gap-1 cursor-pointer ${
+                          closedType === 'notified' 
+                            ? 'border-blue-600 bg-blue-50/70 text-blue-900 shadow-xs' 
+                            : 'border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
+                            closedType === 'notified' ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white'
+                          }`}>
+                            {closedType === 'notified' && <div className="w-1.5 h-1.5 rounded-full bg-white"></div>}
+                          </span>
+                          <span className="text-xs font-bold">Được báo trước khi tới trường</span>
+                        </div>
+                        <span className="text-[10px] text-slate-500 pl-6">Giáo viên không tính tiết, chuyển ca thành <strong>LỊCH RẢNH</strong> để nhận ca thay.</span>
+                      </button>
+                    </div>
+
+                    {/* Phần 3: Lý do báo nghỉ */}
+                    <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                      <label className="text-xs font-bold text-slate-800 block">3. Lý do trường nghỉ:</label>
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        {['Trường tổ chức sự kiện', 'Sửa chữa cơ sở', 'Cúp điện / nước', 'Nghỉ đột xuất', 'Học sinh đi ngoại khóa'].map(r => (
+                          <button
+                            key={r}
+                            type="button"
+                            onClick={() => setClosedReason(r)}
+                            className={`text-[10px] px-2.5 py-1 rounded-lg border transition font-medium cursor-pointer ${
+                              closedReason === r 
+                                ? 'bg-rose-50 border-rose-300 text-rose-700 font-bold' 
+                                : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'
+                            }`}
+                          >
+                            {r}
+                          </button>
+                        ))}
+                      </div>
+                      <input
+                        type="text"
+                        value={closedReason}
+                        onChange={(e) => setClosedReason(e.target.value)}
+                        placeholder="Nhập lý do cụ thể..."
+                        className="w-full text-xs p-2.5 border border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:border-rose-500 focus:outline-hidden"
+                      />
                     </div>
                   </div>
                   
-                  <div className="space-y-3 pt-2">
-                    <p className="text-xs text-slate-600 font-medium">Chọn phương án báo nghỉ của trường:</p>
-                    
+                  <div className="p-4 bg-slate-50 border-t border-slate-100 flex gap-2">
                     <button 
-                      onClick={() => setClosedType('arrived')}
-                      className={`w-full text-left p-3.5 rounded-2xl border transition flex flex-col gap-1 ${
-                        closedType === 'arrived' 
-                          ? 'border-blue-600 bg-blue-50/50 text-blue-900' 
-                          : 'border-slate-150 bg-slate-50 hover:bg-slate-100 text-slate-700'
-                      }`}
+                      type="button"
+                      onClick={() => setSchoolClosedModalSchedule(null)}
+                      disabled={submittingClosed}
+                      className="flex-1 py-3 bg-white hover:bg-slate-100 text-slate-700 font-bold rounded-2xl text-xs border border-slate-200 transition cursor-pointer"
                     >
-                      <div className="flex items-center gap-2">
-                        <span className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                          closedType === 'arrived' ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white'
-                        }`}>
-                          {closedType === 'arrived' && <div className="w-1.5 h-1.5 rounded-full bg-white"></div>}
-                        </span>
-                        <span className="text-xs font-bold">1. Đã tới trường mới báo nghỉ</span>
-                      </div>
-                      <span className="text-[10px] text-slate-500 pl-6">Giáo viên được tính <strong className="text-blue-600 font-extrabold">+1 tiết dạy</strong>, không ảnh hưởng đến chuyên cần.</span>
+                      HỦY BỎ
                     </button>
-
                     <button 
-                      onClick={() => setClosedType('notified')}
-                      className={`w-full text-left p-3.5 rounded-2xl border transition flex flex-col gap-1 ${
-                        closedType === 'notified' 
-                          ? 'border-blue-600 bg-blue-50/50 text-blue-900' 
-                          : 'border-slate-150 bg-slate-50 hover:bg-slate-100 text-slate-700'
-                      }`}
+                      type="button"
+                      onClick={handleSubmitSchoolClosed}
+                      disabled={submittingClosed || selectedCancelScheduleIds.length === 0}
+                      className="flex-1 py-3 bg-rose-600 hover:bg-rose-700 disabled:bg-rose-300 text-white font-bold rounded-2xl text-xs shadow-md shadow-rose-500/15 transition flex items-center justify-center gap-1 cursor-pointer"
                     >
-                      <div className="flex items-center gap-2">
-                        <span className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                          closedType === 'notified' ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white'
-                        }`}>
-                          {closedType === 'notified' && <div className="w-1.5 h-1.5 rounded-full bg-white"></div>}
-                        </span>
-                        <span className="text-xs font-bold">2. Được báo trước khi tới trường</span>
-                      </div>
-                      <span className="text-[10px] text-slate-500 pl-6">Giáo viên không được tính tiết dạy, không ảnh hưởng đến chuyên cần.</span>
+                      {submittingClosed ? 'ĐANG GỬI...' : `BÁO NGHỈ (${selectedCancelScheduleIds.length} TIẾT)`}
                     </button>
                   </div>
                 </div>
-                
-                <div className="p-4 bg-slate-50 border-t border-slate-100 flex gap-2">
-                  <button 
-                    onClick={() => setSchoolClosedModalSchedule(null)}
-                    disabled={submittingClosed}
-                    className="flex-1 py-3 bg-white hover:bg-slate-100 text-slate-700 font-bold rounded-2xl text-xs border border-slate-200 transition"
-                  >
-                    HỦY BỎ
-                  </button>
-                  <button 
-                    onClick={handleSubmitSchoolClosed}
-                    disabled={submittingClosed}
-                    className="flex-1 py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-2xl text-xs shadow-md shadow-rose-500/10 transition flex items-center justify-center gap-1"
-                  >
-                    {submittingClosed ? 'ĐANG GỬI...' : 'ĐỒNG Ý BÁO'}
-                  </button>
-                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Quick Broadcast Announcement Modal Overlay */}
-          {quickAnnouncement && quickAnnouncement.id !== lastReadQaId && 
+          {quickAnnouncement && !isTeacherJoined && !isQaDismissedTemp && 
            (!quickAnnouncement.targetUserId || 
             quickAnnouncement.targetUserId === currentTeacher?.id || 
             quickAnnouncement.targetUserId === currentUser?.id || 
@@ -2872,20 +4215,69 @@ export default function TeacherDashboard({
                     {quickAnnouncement.message}
                   </p>
                 </div>
-                <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
-                  <button 
-                    className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-2xl text-xs shadow-md shadow-blue-500/10 transition active:scale-98"
+                <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-col gap-2">
+                  <a
+                    href="https://m.me/tuyendungmamnonTPHCM?ref=BAT_THONG_BAO"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold rounded-2xl text-xs shadow-md shadow-blue-500/20 transition active:scale-98 flex items-center justify-center gap-1.5 text-center"
                     onClick={() => {
+                      if (currentTeacher?.id) {
+                        fetch(`/api/teachers/${currentTeacher.id}/joined-notification`, { method: 'POST' }).catch(() => {});
+                        currentTeacher.notificationToken = 'ACTIVATED_20261026';
+                      }
                       localStorage.setItem('read_qa_id', quickAnnouncement.id);
                       setLastReadQaId(quickAnnouncement.id);
+                      setIsQaDismissedTemp(true);
                     }}
                   >
-                    ĐÃ HIỂU & ĐÓNG
+                    <MessageCircle className="w-4 h-4 flex-shrink-0" /> BẬT THÔNG BÁO MESSENGER NGAY (1 CHẠM)
+                  </a>
+                  <button 
+                    className="w-full py-2 bg-slate-200 hover:bg-slate-300 text-slate-600 font-bold rounded-2xl text-[11px] transition active:scale-98"
+                    onClick={() => {
+                      // Đóng tạm trong phiên này, lần sau vào app lại nhắc tiếp đến khi tham gia
+                      setIsQaDismissedTemp(true);
+                    }}
+                  >
+                    ĐỂ SAU (SẼ NHẮC LẠI ĐẾN KHI THAM GIA)
                   </button>
                 </div>
               </div>
             </div>
           )}
+
+          {/* Proof Image Fullscreen Modal */}
+          {selectedProofModal && (
+            <div className="fixed inset-0 z-[120] bg-slate-950/80 backdrop-blur-xs flex flex-col items-center justify-center p-4 animate-fadeIn">
+              <div className="bg-white rounded-3xl max-w-sm sm:max-w-md w-full overflow-hidden shadow-2xl space-y-3 p-4 flex flex-col max-h-[90vh]">
+                <div className="flex items-center justify-between border-b pb-2">
+                  <h4 className="font-bold text-xs text-slate-800 truncate">{selectedProofModal.title}</h4>
+                  <button 
+                    onClick={() => setSelectedProofModal(null)}
+                    className="p-1 rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-auto flex items-center justify-center bg-slate-950/5 rounded-2xl p-2 min-h-[260px]">
+                  <img 
+                    src={selectedProofModal.url} 
+                    alt="Minh chứng chi tiết" 
+                    className="max-h-[65vh] w-auto object-contain rounded-xl shadow-md"
+                  />
+                </div>
+                <button
+                  onClick={() => setSelectedProofModal(null)}
+                  className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl transition cursor-pointer"
+                >
+                  Đóng xem ảnh
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Special Event 20/11 Voting Poll Modal */}
 
         </div>
       </div>

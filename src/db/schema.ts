@@ -15,7 +15,13 @@ export const teachers = pgTable('teachers', {
   socialInsurance: integer('social_insurance').default(0).notNull(), // BHXH
   advanceSalary: integer('advance_salary').default(0).notNull(), // Ứng lương
   bonusPeriodsJSON: text('bonus_periods_json').default('{}').notNull(),
+  attendanceBonusOverrideJSON: text('attendance_bonus_override_json').default('{}').notNull(),
   notes: text('notes').default(''),
+  facebookPsid: text('facebook_psid').default(''),
+  facebookName: text('facebook_name').default(''),
+  facebookConnectedAt: text('facebook_connected_at').default(''),
+  notificationToken: text('notification_token').default(''),
+  notificationTokenExpires: text('notification_token_expires').default(''),
   isDeleted: boolean('is_deleted').default(false).notNull(),
   deletedAt: text('deleted_at'),
 });
@@ -41,7 +47,7 @@ export const classes = pgTable('classes', {
   name: text('name').notNull(),
   schoolId: text('school_id').references(() => schools.id, { onDelete: 'cascade' }).notNull(),
   studentCount: integer('student_count').default(0).notNull(),
-  standardPeriods: integer('standard_periods').default(1).notNull(),
+  standardPeriods: doublePrecision('standard_periods').default(1.0).notNull(),
   isDeleted: boolean('is_deleted').default(false).notNull(),
   deletedAt: text('deleted_at'),
 });
@@ -53,7 +59,7 @@ export const schedules = pgTable('schedules', {
   teacherId: text('teacher_id').references(() => teachers.id, { onDelete: 'cascade' }).notNull(),
   schoolId: text('school_id').references(() => schools.id, { onDelete: 'cascade' }).notNull(),
   classId: text('class_id').references(() => classes.id, { onDelete: 'cascade' }).notNull(),
-  periods: integer('periods').default(1).notNull(),
+  periods: doublePrecision('periods').default(1.0).notNull(),
   isDeleted: boolean('is_deleted').default(false).notNull(),
   deletedAt: text('deleted_at'),
 });
@@ -67,7 +73,7 @@ export const attendance = pgTable('attendance', {
   classId: text('class_id').references(() => classes.id, { onDelete: 'cascade' }).notNull(),
   session: text('session').notNull(),
   checkInTime: text('check_in_time').notNull(),
-  periods: integer('periods').default(1).notNull(),
+  periods: doublePrecision('periods').default(1.0).notNull(),
   lat: doublePrecision('lat').default(0.0).notNull(),
   lng: doublePrecision('lng').default(0.0).notNull(),
   distanceMeter: doublePrecision('distance_meter').default(0.0).notNull(),
@@ -77,6 +83,7 @@ export const attendance = pgTable('attendance', {
   isFlagged: boolean('is_flagged').default(false).notNull(),
   flagReason: text('flag_reason').default(''),
   confirmedByAdmin: boolean('confirmed_by_admin').default(false).notNull(),
+  hasSelfie: boolean('has_selfie').default(false),
 });
 
 export const changeRequests = pgTable('change_requests', {
@@ -92,6 +99,7 @@ export const changeRequests = pgTable('change_requests', {
   status: text('status').default('pending').notNull(), // 'pending' | 'approved' | 'rejected'
   createdAt: text('created_at').notNull(),
   adminNotes: text('admin_notes').default(''),
+  proofImage: text('proof_image').default(''),
 });
 
 export const systemNotifications = pgTable('system_notifications', {
@@ -117,6 +125,10 @@ export const appSettings = pgTable('app_settings', {
   allowTeacherScheduleEdit: boolean('allow_teacher_schedule_edit').default(false).notNull(),
   allowTeacherUpdateSchoolLocation: boolean('allow_teacher_update_school_location').default(false).notNull(),
   requireSelfieCheckIn: boolean('require_selfie_check_in').default(true).notNull(),
+  fbPageUrl: text('fb_page_url').default(''),
+  fbPageAccessToken: text('fb_page_access_token').default(''),
+  fbVerifyToken: text('fb_verify_token').default('CAUVONG_FB_SECRET_VERIFY_TOKEN_2026'),
+  fbAutoReminderEnabled: boolean('fb_auto_reminder_enabled').default(true),
 });
 
 export const meetingAttendance = pgTable('meeting_attendance', {
@@ -159,7 +171,7 @@ export const schoolCancellations = pgTable('school_cancellations', {
   classId: text('class_id').references(() => classes.id, { onDelete: 'cascade' }).notNull(),
   session: text('session').notNull(),
   cancellationType: text('cancellation_type').notNull(), // 'arrived' | 'notified'
-  periodsCredited: integer('periods_credited').default(0).notNull(),
+  periodsCredited: doublePrecision('periods_credited').default(0.0).notNull(),
   reason: text('reason').default('').notNull(),
   createdAt: text('created_at').notNull(),
 });
